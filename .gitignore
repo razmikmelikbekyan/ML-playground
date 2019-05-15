@@ -1,0 +1,9 @@
+*.pyc
+.cache/
+*.log*
+*logs.txt
+.idea/
+.ipynb_checkpoints/
+*venv/
+*tmp/
+
