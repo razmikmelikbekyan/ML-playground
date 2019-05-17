@@ -256,3 +256,5 @@ assert np.all(np.isclose(dw_hh_1, dWhh_2, atol=1e-10))
 print()
 print('dWhy')
 assert np.array_equal(dw_hy_1, dWhy_2)
+
+# http://willwolf.io/2016/10/18/recurrent-neural-network-gradients-and-lessons-learned-therein/
