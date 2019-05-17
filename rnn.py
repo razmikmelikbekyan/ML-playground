@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Tuple, Dict
 
 import numpy as np
 
@@ -10,7 +10,9 @@ def softmax(x: np.ndarray) -> np.ndarray:
 def sigmoid(x: np.ndarray) -> np.ndarray:
     return 1. / (1 + np.exp(-x))
 
+
 state = np.random.RandomState(seed=15)
+
 
 class RNN:
     """
@@ -52,7 +54,7 @@ class RNN:
             (vocabulary_size, hidden_size)
         )
 
-    def forward(self, x: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    def forward(self, x: np.ndarray) -> Tuple[Dict, Dict]:
         """
         Makes forward pass through network.
         :param x: the array of integers, where each item is the index of character, the size of
@@ -68,15 +70,15 @@ class RNN:
         # non linear function
         f = np.tanh if self.non_linearity == 'tanh' else sigmoid
 
-        states = np.zeros((n, self.hidden_size))
-        predicted_probabilities = np.zeros((n, self.vocabulary_size))
+        predicted_probabilities, states = {}, {}
+        states[-1] = np.zeros((self.hidden_size, 1))
         for t in range(n):
             # state at t - 1
-            h_t_1 = np.zeros(self.hidden_size) if t == 0 else states[t - 1]
+            h_t_1 = states[t - 1]
 
             # TODO: make more smart
             # one hot encoding input
-            input_x = np.zeros(self.vocabulary_size)
+            input_x = np.zeros((self.vocabulary_size, 1))
             input_x[x[t]] = 1
 
             # state at t
@@ -101,8 +103,9 @@ class RNN:
         _, outputs = self.forward(x)
         return np.argmax(outputs, axis=1)
 
-    def calculate_loss(self, predicted_probabilities: np.ndarray, labels: np.ndarray) -> float:
-        return -sum(np.log(p[labels[i]]) for i, p in enumerate(predicted_probabilities))
+    @staticmethod
+    def calculate_loss(predicted_probabilities: Dict, labels: np.ndarray) -> float:
+        return -sum(np.log(predicted_probabilities[i][labels[i], 0]) for i in range(len(labels)))
 
     def calculate_h_grad_wrt_z(self, h_t: np.ndarray) -> np.ndarray:
         """
@@ -125,28 +128,11 @@ class RNN:
         dz_t = dh_t * self.calculate_h_grad_wrt_z(states[t])
 
         grads = [dz_t]
-        for i in reversed(range(1, t + 1)):
+        for i in reversed(range(t)):
             # dl / dz_(t-1) = (dl / dz_{t})(dz_{t} / dh_{t-1}) * (dh_{t-1) / dz_{t-1})
-            dz_i = np.dot(self.w_hh, grads[-1]) * self.calculate_h_grad_wrt_z(states[i - 1])
+            dz_i = np.dot(self.w_hh.T, grads[-1]) * self.calculate_h_grad_wrt_z(states[i])
             grads.append(dz_i)
         return grads
-
-    def calculate_w_hh_grad(self, dh_t: np.ndarray, states: np.ndarray, t: int):
-        """
-        Calculates dloss_{t} / dd_whh, aka gradient of loss at time t with respect to W_hh.
-        :param dh_t: dloss_{t} / dh_{t}, aka gradient of loss at time t with respect to h_{t}
-        :param states_gradients: the array of state gradients, where each item represents the state
-                                 gradient with respect to its previous state
-        :param t: time index
-        :return: the gradient of loss w.r.t. W_hh
-        """
-        dw_hh = np.zeros_like(self.w_hh)
-
-        tmp = dh_t * (1 - states[t] ** 2)
-        for i in reversed(range(1, t + 1)):
-            dw_hh += np.outer(tmp, states[i - 1])
-            tmp = np.dot(self.w_hh, tmp) * (1 - states[i - 1] ** 2)
-        return dw_hh
 
     def backward(self, x: np.ndarray, labels: np.ndarray):
         """
@@ -157,9 +143,11 @@ class RNN:
         """
 
         n = x.shape[0]
-        inputs = np.zeros((n, self.vocabulary_size))
-        inputs[(np.arange(n), x)] = 1
+        x_matrix = np.zeros((n, self.vocabulary_size))
+        x_matrix[(np.arange(n), x)] = 1
 
+        labels_matrix = np.zeros((n, self.vocabulary_size))
+        labels_matrix[(np.arange(n), labels)] = 1
 
         dw_hx = np.zeros_like(self.w_hx)
         dw_hh = np.zeros_like(self.w_hh)
@@ -168,27 +156,22 @@ class RNN:
         states, predicted_probabilities = self.forward(x)
 
         for t in reversed(range(n)):
-            input_x = np.zeros(self.vocabulary_size)
-            input_x[x[t]] = 1
-
-            one_hot_labels = np.zeros(self.vocabulary_size)
-            one_hot_labels[labels[t]] = 1
-
-            dy_t = predicted_probabilities[t] - one_hot_labels
+            dy_t = predicted_probabilities[t] - labels_matrix[t].reshape(-1, 1)
             dh_t = np.dot(self.w_hy.T, dy_t)
             dz_t_0 = self.calculate_loss_grad_wrt_z(dh_t, states, t)
 
             # dl / dw_hy = (dl / dy) * (dl * dw_hy)
-            dw_hy += np.outer(dy_t, states[t].T)
+            dw_hy += np.dot(dy_t, states[t].T)
 
             # dl / dw_hh = ∑ (dl / dz_{k}) * (dz_{k} / dw_hy) for all k from 0 to t
             dw_hh += sum(
-                np.outer(dz_i, states[i - 1]) for dz_i, i in zip(dz_t_0, reversed(range(1, t + 1)))
+                np.dot(dz_i, states[i - 1].T) for dz_i, i in zip(dz_t_0, reversed(range(t + 1)))
             )
 
             # dl / dw_hx = ∑ (dl / dz_{k}) * (dz_{k} / dw_hx) for all k from 0 to t
             dw_hx += sum(
-                np.outer(dz_i, inputs[i].T) for dz_i, i in zip(dz_t_0, reversed(range(1, t + 1)))
+                np.dot(dz_i, x_matrix[i].reshape(-1, 1).T) for dz_i, i in zip(dz_t_0, reversed(
+                    range(t + 1)))
             )
 
         return dw_hx, dw_hh, dw_hy
@@ -214,11 +197,13 @@ class RNN:
         # backward pass: compute gradients going backwards
         dWxh, dWhh, dWhy = np.zeros_like(self.w_hx), np.zeros_like(self.w_hh), np.zeros_like(
             self.w_hy)
+
         dhnext = np.zeros_like(hs[0])
         for t in reversed(range(len(inputs))):
             dy = np.copy(ps[t])
-            dy[targets[
-                t]] -= 1  # backprop into y. see http://cs231n.github.io/neural-networks-case-study/#grad if confused here
+            dy[targets[t]] -= 1
+
+            # backprop into y. see http://cs231n.github.io/neural-networks-case-study/#grad
             dWhy += np.dot(dy, hs[t].T)
             dh = np.dot(self.w_hy.T, dy) + dhnext  # backprop into h
             dhraw = (1 - hs[t] * hs[t]) * dh  # backprop through tanh nonlinearity
@@ -245,27 +230,29 @@ labels = np.array([char_to_ix[x] for x in data[1:n + 1]])
 rnn = RNN(vocab_size, 10)
 _, p_probs = rnn.forward(inputs)
 
-loss = rnn.calculate_loss(p_probs, labels)
-print('loss_1={:.5f}'.format(loss))
-
-whx, whh, why = rnn.w_hx.copy(), rnn.w_hh.copy(), rnn.w_hy.copy()
+l_1 = rnn.calculate_loss(p_probs, labels)
+print('loss_1={:.5f}'.format(l_1))
 
 dw_hx_1, dw_hh_1, dw_hy_1 = rnn.backward(inputs, labels)
 
-rnn = RNN(vocab_size, 10)
-rnn.w_hx, rnn.w_hh, rnn.w_hy = whx, whh, why
+l_2, dWxh_2, dWhh_2, dWhy_2, _ = rnn.lossFun(inputs, labels, np.zeros((10, 1)))
+print('loss_2={:.5f}'.format(l_2))
 
-loss, dWxh_2, dWhh_2, dWhy_2, _ = rnn.lossFun(inputs, labels, np.zeros((10, 1)))
-print('loss_2={:.5f}'.format(loss))
+print()
+print('loss')
+print(l_1 == l_2)
+
 #
 print()
 print('dWxh')
-print(np.isclose(dw_hx_1, dWxh_2))
+assert np.all(np.isclose(dw_hx_1, dWxh_2, atol=1e-10))
+# print(dw_hx_1 - dWxh_2)
 #
 print()
 print('dWhh')
-print(np.isclose(dw_hh_1, dWhh_2))
+assert np.all(np.isclose(dw_hh_1, dWhh_2, atol=1e-10))
 
-# print()
-# print('dWhy')
-# print(np.isclose(dw_hy_1, dWhy_2))
+#
+print()
+print('dWhy')
+assert np.array_equal(dw_hy_1, dWhy_2)
