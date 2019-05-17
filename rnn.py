@@ -10,6 +10,7 @@ def softmax(x: np.ndarray) -> np.ndarray:
 def sigmoid(x: np.ndarray) -> np.ndarray:
     return 1. / (1 + np.exp(-x))
 
+state = np.random.RandomState(seed=15)
 
 class RNN:
     """
@@ -76,7 +77,7 @@ class RNN:
             # TODO: make more smart
             # one hot encoding input
             input_x = np.zeros(self.vocabulary_size)
-            input_x[t] = x[t]
+            input_x[x[t]] = 1
 
             # state at t
             z_t = np.dot(self.w_hh, h_t_1) + np.dot(self.w_hx, input_x)
@@ -154,7 +155,11 @@ class RNN:
         :param labels:
         :return:
         """
+
         n = x.shape[0]
+        inputs = np.zeros((n, self.vocabulary_size))
+        inputs[(np.arange(n), x)] = 1
+
 
         dw_hx = np.zeros_like(self.w_hx)
         dw_hh = np.zeros_like(self.w_hh)
@@ -163,6 +168,9 @@ class RNN:
         states, predicted_probabilities = self.forward(x)
 
         for t in reversed(range(n)):
+            input_x = np.zeros(self.vocabulary_size)
+            input_x[x[t]] = 1
+
             one_hot_labels = np.zeros(self.vocabulary_size)
             one_hot_labels[labels[t]] = 1
 
@@ -178,17 +186,48 @@ class RNN:
                 np.outer(dz_i, states[i - 1]) for dz_i, i in zip(dz_t_0, reversed(range(1, t + 1)))
             )
 
-            ll = sum(
-                np.(dz_i, states[i - 1]) for dz_i, i in zip(dz_t_0, reversed(range(1, t + 1)))
-            )
-
-            b = self.calculate_w_hh_grad(dh_t, states, t)
-            print(ll.shape, b.shape)
-
             # dl / dw_hx = ∑ (dl / dz_{k}) * (dz_{k} / dw_hx) for all k from 0 to t
-            dw_hh += sum(
-                np.dot(dz_i, states[i - 1].T) for dz_i, i in zip(dz_t_0, reversed(range(1, t + 1)))
+            dw_hx += sum(
+                np.outer(dz_i, inputs[i].T) for dz_i, i in zip(dz_t_0, reversed(range(1, t + 1)))
             )
+
+        return dw_hx, dw_hh, dw_hy
+
+    def lossFun(self, inputs, targets, hprev):
+        """
+        inputs,targets are both list of integers.
+        hprev is Hx1 array of initial hidden state
+        returns the loss, gradients on model parameters, and last hidden state
+        """
+        xs, hs, ys, ps = {}, {}, {}, {}
+        hs[-1] = np.copy(hprev)
+        loss = 0
+        # forward pass
+        for t in range(len(inputs)):
+            xs[t] = np.zeros((vocab_size, 1))  # encode in 1-of-k representation
+            xs[t][inputs[t]] = 1
+            hs[t] = np.tanh(
+                np.dot(self.w_hx, xs[t]) + np.dot(self.w_hh, hs[t - 1]))  # hidden state
+            ys[t] = np.dot(self.w_hy, hs[t])  # unnormalized log probabilities for next chars
+            ps[t] = np.exp(ys[t]) / np.sum(np.exp(ys[t]))  # probabilities for next chars
+            loss += -np.log(ps[t][targets[t], 0])  # softmax (cross-entropy loss)
+        # backward pass: compute gradients going backwards
+        dWxh, dWhh, dWhy = np.zeros_like(self.w_hx), np.zeros_like(self.w_hh), np.zeros_like(
+            self.w_hy)
+        dhnext = np.zeros_like(hs[0])
+        for t in reversed(range(len(inputs))):
+            dy = np.copy(ps[t])
+            dy[targets[
+                t]] -= 1  # backprop into y. see http://cs231n.github.io/neural-networks-case-study/#grad if confused here
+            dWhy += np.dot(dy, hs[t].T)
+            dh = np.dot(self.w_hy.T, dy) + dhnext  # backprop into h
+            dhraw = (1 - hs[t] * hs[t]) * dh  # backprop through tanh nonlinearity
+            dWxh += np.dot(dhraw, xs[t].T)
+            dWhh += np.dot(dhraw, hs[t - 1].T)
+            dhnext = np.dot(self.w_hh.T, dhraw)
+        # for dparam in [dWxh, dWhh, dWhy, dbh, dby]:
+        #     np.clip(dparam, -5, 5, out=dparam)  # clip to mitigate exploding gradients
+        return loss, dWxh, dWhh, dWhy, hs[len(inputs) - 1]
 
 
 n = 25
@@ -200,11 +239,33 @@ print('data has %d characters, %d unique.' % (data_size, vocab_size))
 char_to_ix = {ch: i for i, ch in enumerate(chars)}
 ix_to_char = {i: ch for i, ch in enumerate(chars)}
 
-inputs = [char_to_ix[x] for x in data[:n]]
-labels = [char_to_ix[x] for x in data[1:n + 1]]
+inputs = np.array([char_to_ix[x] for x in data[:n]])
+labels = np.array([char_to_ix[x] for x in data[1:n + 1]])
 
-rnn = RNN(len(char_to_ix), 10)
-a, b = rnn.forward(np.array(inputs))
-loss = rnn.calculate_loss(b, np.array(labels))
-rnn.backward(np.array(inputs), np.array(labels))
-print(a.shape, b.sum(axis=1))
+rnn = RNN(vocab_size, 10)
+_, p_probs = rnn.forward(inputs)
+
+loss = rnn.calculate_loss(p_probs, labels)
+print('loss_1={:.5f}'.format(loss))
+
+whx, whh, why = rnn.w_hx.copy(), rnn.w_hh.copy(), rnn.w_hy.copy()
+
+dw_hx_1, dw_hh_1, dw_hy_1 = rnn.backward(inputs, labels)
+
+rnn = RNN(vocab_size, 10)
+rnn.w_hx, rnn.w_hh, rnn.w_hy = whx, whh, why
+
+loss, dWxh_2, dWhh_2, dWhy_2, _ = rnn.lossFun(inputs, labels, np.zeros((10, 1)))
+print('loss_2={:.5f}'.format(loss))
+#
+print()
+print('dWxh')
+print(np.isclose(dw_hx_1, dWxh_2))
+#
+print()
+print('dWhh')
+print(np.isclose(dw_hh_1, dWhh_2))
+
+# print()
+# print('dWhy')
+# print(np.isclose(dw_hy_1, dWhy_2))
