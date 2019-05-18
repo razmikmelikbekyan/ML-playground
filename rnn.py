@@ -1,3 +1,4 @@
+import operator
 from typing import Tuple, Dict
 
 import numpy as np
@@ -11,13 +12,11 @@ def sigmoid(x: np.ndarray) -> np.ndarray:
     return 1. / (1 + np.exp(-x))
 
 
-state = np.random.RandomState(seed=15)
-
-
 class RNN:
     """
     This class represents simple Recurrent Neural Network implementation for  for
-    character-level language model.
+    character-level language model. In this model the purpose of the network is correctly
+    predicting the next character, given the previous one.
     """
 
     def __init__(self,
@@ -54,6 +53,23 @@ class RNN:
             (vocabulary_size, hidden_size)
         )
 
+    def one_hot_encode(self, x: np.ndarray) -> np.ndarray:
+        """
+        Given the array of inputs or labels, where each item is the index of character. Performs
+        one hot encoding, aka returns the matrix with dimensions (len(x), vocabulary_size). Each
+        row of the matrix consists of 0s and only one 1. The 1 is located at the index of the cor-
+        responding correct character.
+        """
+        n_rows = len(x)
+
+        # here we manually add 1 at the end, in order to have each row of the matrix as a
+        # matrix, instead of vector, for properly calculating dot products
+        # for example, if self.vocabulary_size = 15, then the each row should have the
+        # size - (15, 1), (without additional 1, it will have size - (15, )
+        one_hot_encoded = np.zeros((n_rows, self.vocabulary_size, 1))
+        one_hot_encoded[(np.arange(n_rows), x)] = 1
+        return one_hot_encoded
+
     def forward(self, x: np.ndarray) -> Tuple[Dict, Dict]:
         """
         Makes forward pass through network.
@@ -64,25 +80,20 @@ class RNN:
                  predicted_probabilities - array of predicted probabilities for each character in
                                            vocabulary, size = (sequence length, vocabulary size)
         """
-        # sequence length
-        n = x.shape[0]
-
         # non linear function
         f = np.tanh if self.non_linearity == 'tanh' else sigmoid
 
+        # one hot encoding of input
+        inputs_matrix = self.one_hot_encode(x)
+
         predicted_probabilities, states = {}, {}
         states[-1] = np.zeros((self.hidden_size, 1))
-        for t in range(n):
+        for t in range(len(x)):
             # state at t - 1
             h_t_1 = states[t - 1]
 
-            # TODO: make more smart
-            # one hot encoding input
-            input_x = np.zeros((self.vocabulary_size, 1))
-            input_x[x[t]] = 1
-
             # state at t
-            z_t = np.dot(self.w_hh, h_t_1) + np.dot(self.w_hx, input_x)
+            z_t = np.dot(self.w_hh, h_t_1) + np.dot(self.w_hx, inputs_matrix[t])
             h_t = f(z_t)
 
             # prediction from hidden state at t
@@ -105,6 +116,10 @@ class RNN:
 
     @staticmethod
     def calculate_loss(predicted_probabilities: Dict, labels: np.ndarray) -> float:
+        """
+        Calculates cross entropy loss using target characters indexes and network predictions for
+        all characters: loss = ∑ -label_{t} * log(predicted_probability_{t})
+        """
         return -sum(np.log(predicted_probabilities[i][labels[i], 0]) for i in range(len(labels)))
 
     def calculate_h_grad_wrt_z(self, h_t: np.ndarray) -> np.ndarray:
@@ -113,7 +128,7 @@ class RNN:
         Note that h_{t} = tanh(z_{t}) or h_{t} = sigmoid(z_{t})"""
         return 1 - h_t ** 2 if self.non_linearity == 'tanh' else h_t * (1 - h_t)
 
-    def calculate_loss_grad_wrt_z(self, dh_t: np.ndarray, states: np.ndarray, t: int):
+    def calculate_loss_grad_wrt_z(self, dh_t: np.ndarray, states: Dict, t: int):
         """
         Calculates dloss_{t} / dz_{k} for all k from 1 to t. Please note that h_{t} = f(z_{t})
 
@@ -134,30 +149,39 @@ class RNN:
             grads.append(dz_i)
         return grads
 
-    def backward(self, x: np.ndarray, labels: np.ndarray):
+    def backward(self,
+                 x: np.ndarray,
+                 labels: np.ndarray,
+                 states: Dict,
+                 predicted_probabilities: Dict):
         """
+        Makes backward pass through the network. Returns the gradients of loss w.r.t. network
+        parameters -  w_hx, w_hh, w_hy.
 
-        :param x:
-        :param labels:
-        :return:
+        :param x: the array of input characters, where each item is the index of character, the
+                  size of array will be the sequence length
+        :param labels: the array of target characters, where each item is the index of character,
+                       the size of array will be the sequence length
+        :param states: the hidden states of network, (the first output of the self.forward method)
+        :param predicted_probabilities: network predictions for given inputs,
+                                        (the second output of the self.forward method)
+        :return: gradients of w_hx, w_hh, w_hy
         """
-
-        n = x.shape[0]
-        x_matrix = np.zeros((n, self.vocabulary_size))
-        x_matrix[(np.arange(n), x)] = 1
-
-        labels_matrix = np.zeros((n, self.vocabulary_size))
-        labels_matrix[(np.arange(n), labels)] = 1
+        inputs_matrix = self.one_hot_encode(x)
+        labels_matrix = self.one_hot_encode(labels)
 
         dw_hx = np.zeros_like(self.w_hx)
         dw_hh = np.zeros_like(self.w_hh)
         dw_hy = np.zeros_like(self.w_hy)
 
-        states, predicted_probabilities = self.forward(x)
+        for t in reversed(range(len(x))):
+            # dl / dy = p - label
+            dy_t = predicted_probabilities[t] - labels_matrix[t]
 
-        for t in reversed(range(n)):
-            dy_t = predicted_probabilities[t] - labels_matrix[t].reshape(-1, 1)
+            # dl / dh = (dl / dy) (dy / dh) = (p - label)w_hy
             dh_t = np.dot(self.w_hy.T, dy_t)
+
+            # dl / dz
             dz_t_0 = self.calculate_loss_grad_wrt_z(dh_t, states, t)
 
             # dl / dw_hy = (dl / dy) * (dl * dw_hy)
@@ -165,16 +189,75 @@ class RNN:
 
             # dl / dw_hh = ∑ (dl / dz_{k}) * (dz_{k} / dw_hy) for all k from 0 to t
             dw_hh += sum(
-                np.dot(dz_i, states[i - 1].T) for dz_i, i in zip(dz_t_0, reversed(range(t + 1)))
+                np.dot(dz_i, states[i - 1].T)
+                for dz_i, i in zip(dz_t_0, reversed(range(t + 1)))
             )
 
             # dl / dw_hx = ∑ (dl / dz_{k}) * (dz_{k} / dw_hx) for all k from 0 to t
             dw_hx += sum(
-                np.dot(dz_i, x_matrix[i].reshape(-1, 1).T) for dz_i, i in zip(dz_t_0, reversed(
-                    range(t + 1)))
+                np.dot(dz_i, inputs_matrix[i].T)
+                for dz_i, i in zip(dz_t_0, reversed(range(t + 1)))
             )
 
         return dw_hx, dw_hh, dw_hy
+
+    def gradient_check(self, x, y, h=0.001, error_threshold=0.01):
+        # Calculate the gradients using backpropagation. We want to checker if these are correct.
+        states, predicted_probabilities = self.forward(x)
+        bptt_gradients = self.backward(x, y, states, predicted_probabilities)
+
+        # List of all parameters we want to check.
+        model_parameters = ['w_hx', 'w_hh', 'w_hy']
+
+        # Gradient check for each parameter
+        for pidx, pname in enumerate(model_parameters):
+            # Get the actual parameter value from the mode, e.g. model.W
+            parameter = operator.attrgetter(pname)(self)
+            print(f"Performing gradient check for parameter {pname} "
+                  f"with size = {np.prod(parameter.shape)}")
+
+            # Iterate over each element of the parameter matrix, e.g. (0,0), (0,1), ...
+            it = np.nditer(parameter, flags=['multi_index'], op_flags=['readwrite'])
+            while not it.finished:
+                ix = it.multi_index
+
+                # Save the original value so we can reset it later
+                original_value = parameter[ix]
+
+                # Estimate the gradient using (f(x+h) - f(x-h))/(2*h)
+
+                parameter[ix] = original_value + h
+                _, ps = self.forward(x)
+                gradplus = self.calculate_loss(ps, y)
+
+                parameter[ix] = original_value - h
+                _, ps = self.forward(x)
+                gradminus = self.calculate_loss(ps, y)
+
+                estimated_gradient = (gradplus - gradminus) / (2 * h)
+
+                # Reset parameter to original value
+                parameter[ix] = original_value
+
+                # The gradient for this parameter calculated using backpropagation
+                backprop_gradient = bptt_gradients[pidx][ix]
+
+                # calculate The relative error: (|x - y|/(|x| + |y|))
+                relative_error = (
+                        np.abs(backprop_gradient - estimated_gradient) /
+                        (np.abs(backprop_gradient) + np.abs(estimated_gradient))
+                )
+                # If the error is to large fail the gradient check
+                if relative_error > error_threshold:
+                    print(f"Gradient Check ERROR: parameter = {pname} ix = {ix}")
+                    print(f"+ h Loss: {gradplus}")
+                    print(f"- h Loss: {gradminus}")
+                    print(f"Estimated_gradient: {estimated_gradient}")
+                    print(f"Backpropagation gradient: {backprop_gradient}")
+                    print(f"Relative Error: {relative_error}")
+                    return
+                it.iternext()
+            print(f"Gradient check for parameter {pname} passed.")
 
     def lossFun(self, inputs, targets, hprev):
         """
@@ -228,12 +311,12 @@ inputs = np.array([char_to_ix[x] for x in data[:n]])
 labels = np.array([char_to_ix[x] for x in data[1:n + 1]])
 
 rnn = RNN(vocab_size, 10)
-_, p_probs = rnn.forward(inputs)
+states, p_probs = rnn.forward(inputs)
 
 l_1 = rnn.calculate_loss(p_probs, labels)
 print('loss_1={:.5f}'.format(l_1))
 
-dw_hx_1, dw_hh_1, dw_hy_1 = rnn.backward(inputs, labels)
+dw_hx_1, dw_hh_1, dw_hy_1 = rnn.backward(inputs, labels, states, p_probs)
 
 l_2, dWxh_2, dWhh_2, dWhy_2, _ = rnn.lossFun(inputs, labels, np.zeros((10, 1)))
 print('loss_2={:.5f}'.format(l_2))
