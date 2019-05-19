@@ -1,0 +1,5 @@
+{
+  "hidden_size": 20,
+  "non_linearity": "tanh",
+  "sequence_length": 25
+}

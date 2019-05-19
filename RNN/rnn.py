@@ -130,13 +130,13 @@ class RNN:
         _, ps = self.forward(x)
         return np.argmax(ps, axis=1)
 
-    @staticmethod
-    def calculate_loss(predicted_probabilities: Dict, labels: np.ndarray) -> float:
+    def calculate_loss(self, x: np.ndarray, labels: np.ndarray) -> float:
         """
         Calculates cross entropy loss using target characters indexes and network predictions for
         all characters: loss = ∑ -label_{t} * log(predicted_probability_{t})
         """
-        return -sum(np.log(predicted_probabilities[i][labels[i], 0]) for i in range(len(labels)))
+        _, ps = self.forward(x)
+        return -sum(np.log(ps[i][labels[i], 0]) for i in range(len(labels)))
 
     # ### Backward pass ###
 
@@ -305,14 +305,12 @@ class RNN:
 
                 # x + delta
                 parameter[ix] = original_value + delta
-                _, ps = self.forward(x)
-                loss_plus = self.calculate_loss(ps, labels)
+                loss_plus = self.calculate_loss(x, labels)
                 self.reset_current_state()
 
                 # x - delta
                 parameter[ix] = original_value - delta
-                _, ps = self.forward(x)
-                loss_minus = self.calculate_loss(ps, labels)
+                loss_minus = self.calculate_loss(x, labels)
                 self.reset_current_state()
 
                 numeric_gradient = (loss_plus - loss_minus) / (2 * delta)
@@ -384,7 +382,7 @@ class RNN:
                  dw_hx: np.ndarray,
                  dw_hh: np.ndarray,
                  dw_hy: np.ndarray,
-                 lr: float = 1e-3):
+                 lr: float):
         """
         Performs gradient descent step, for w_hx, w_hh, w_hy.
 
@@ -393,6 +391,17 @@ class RNN:
         self.w_hx -= lr * dw_hx
         self.w_hh -= lr * dw_hh
         self.w_hy -= lr * dw_hy
+
+    def train(self, x: np.ndarray, labels: np.ndarray, lr: float):
+        """
+        Performs training of model:
+         - forward pass
+         - backward pass
+         - sgd update
+        """
+        hs, ps = self.forward(x)
+        dw_hx, dw_hh, dw_hy = self.backward(x, labels, hs, ps)
+        self.sgd_step(dw_hx, dw_hh, dw_hy, lr)
 
     def sample(self, seed_ix: int, n: int) -> List[int]:
         """
@@ -413,51 +422,52 @@ class RNN:
             sample_indexes.append(ix)
         return sample_indexes
 
+if __name__ == '__main__':
+    n = 25
+    data = open('input.txt', 'r').read()  # should be simple plain text file
 
-n = 25
-data = open('input.txt', 'r').read()  # should be simple plain text file
+    chars = list(set(data))
+    data_size, vocab_size = len(data), len(chars)
+    print('data has %d characters, %d unique.' % (data_size, vocab_size))
+    char_to_ix = {ch: i for i, ch in enumerate(chars)}
+    ix_to_char = {i: ch for i, ch in enumerate(chars)}
 
-chars = list(set(data))
-data_size, vocab_size = len(data), len(chars)
-print('data has %d characters, %d unique.' % (data_size, vocab_size))
-char_to_ix = {ch: i for i, ch in enumerate(chars)}
-ix_to_char = {i: ch for i, ch in enumerate(chars)}
+    inputs = np.array([char_to_ix[x] for x in data[:n]])
+    labels = np.array([char_to_ix[x] for x in data[1:n + 1]])
 
-inputs = np.array([char_to_ix[x] for x in data[:n]])
-labels = np.array([char_to_ix[x] for x in data[1:n + 1]])
+    rnn = RNN(vocab_size, 10)
+    states, p_probs = rnn.forward(inputs)
 
-rnn = RNN(vocab_size, 10)
-states, p_probs = rnn.forward(inputs)
+    rnn.reset_current_state()
+    l_1 = rnn.calculate_loss(inputs, labels)
+    print('loss_1={:.5f}'.format(l_1))
 
-l_1 = rnn.calculate_loss(p_probs, labels)
-print('loss_1={:.5f}'.format(l_1))
+    dw_hx_1, dw_hh_1, dw_hy_1 = rnn.backward(inputs, labels, states, p_probs)
 
-dw_hx_1, dw_hh_1, dw_hy_1 = rnn.backward(inputs, labels, states, p_probs)
+    l_2, dWxh_2, dWhh_2, dWhy_2, _ = rnn.lossFun(inputs, labels, np.zeros((10, 1)))
+    print('loss_2={:.5f}'.format(l_2))
 
-l_2, dWxh_2, dWhh_2, dWhy_2, _ = rnn.lossFun(inputs, labels, np.zeros((10, 1)))
-print('loss_2={:.5f}'.format(l_2))
+    print()
+    print('loss')
+    print(l_1 == l_2)
 
-print()
-print('loss')
-print(l_1 == l_2)
+    #
+    print()
+    print('dWxh')
+    assert np.all(np.isclose(dw_hx_1, dWxh_2, atol=1e-10))
+    # print(dw_hx_1 - dWxh_2)
+    #
+    print()
+    print('dWhh')
+    assert np.all(np.isclose(dw_hh_1, dWhh_2, atol=1e-10))
 
-#
-print()
-print('dWxh')
-assert np.all(np.isclose(dw_hx_1, dWxh_2, atol=1e-10))
-# print(dw_hx_1 - dWxh_2)
-#
-print()
-print('dWhh')
-assert np.all(np.isclose(dw_hh_1, dWhh_2, atol=1e-10))
+    #
+    print()
+    print('dWhy')
+    assert np.array_equal(dw_hy_1, dWhy_2)
 
-#
-print()
-print('dWhy')
-assert np.array_equal(dw_hy_1, dWhy_2)
+    rnn.current_state = np.zeros_like(rnn.current_state)
+    rnn.gradient_check(np.array([0, 1, 2, 3, 4]), np.array([1, 2, 3, 4, 5]))
 
-rnn.current_state = np.zeros_like(rnn.current_state)
-rnn.gradient_check(np.array([0, 1, 2, 3, 4]), np.array([1, 2, 3, 4, 5]))
-
-# http://willwolf.io/2016/10/18/recurrent-neural-network-gradients-and-lessons-learned-therein/
-print(rnn.sample(10, 5))
+    # http://willwolf.io/2016/10/18/recurrent-neural-network-gradients-and-lessons-learned-therein/
+    print(rnn.sample(10, 5))
