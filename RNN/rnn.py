@@ -56,6 +56,22 @@ class RNN:
         # setting the current state
         self.current_state = np.zeros((self.hidden_size, 1))
 
+    def save(self, saving_path: str):
+        """Saves model."""
+        params = [self.w_hx, self.w_hh, self.w_hy, self.current_state]
+        np.save(saving_path, params)
+        print(f'Model has been save at the following path: {saving_path}.')
+
+    @staticmethod
+    def load(model_path: str):
+        """Loads saved model and returns it."""
+        w_hx, w_hh, w_hy, current_state = np.load(model_path)
+        _, vocabulary_size = w_hx.shape
+        hidden_size, hidden_size = w_hh.shape
+        model = RNN(vocabulary_size, hidden_size)
+        model.w_hx, model.w_hh, model.w_hy, model.current_state = w_hx, w_hh, w_hy, current_state
+        return model
+
     def _one_hot_encode(self, x: np.ndarray) -> np.ndarray:
         """
         Given the array of inputs or labels, where each item is the index of character. Performs
@@ -79,7 +95,7 @@ class RNN:
 
     # ### Forward pass ###
 
-    def forward(self, x: np.ndarray) -> Tuple[Dict, Dict]:
+    def forward(self, x: np.ndarray, update_state: bool) -> Tuple[Dict, Dict]:
         """
         The basic forward pass:
 
@@ -91,6 +107,7 @@ class RNN:
         Makes forward pass through network.
         :param x: the array of integers, where each item is the index of character, the size of
                   array will be the sequence length
+        :param update_state: bool, if True updates current state with last state
         :return: the tuple of states and predicted_probabilities
                  states - array of states, size = (sequence length, hidden size)
                  predicted_probabilities - array of predicted probabilities for each character in
@@ -119,7 +136,8 @@ class RNN:
             # updating hidden state and and predicted_probabilities keepers
             hs[t], ps[t] = h_t, p_t
 
-        self.current_state = hs[len(x) - 1]  # updating the current state
+        if update_state:
+            self.current_state = hs[len(x) - 1]  # updating the current state
         return hs, ps
 
     def predict(self, x: np.ndarray) -> np.ndarray:
@@ -127,15 +145,15 @@ class RNN:
         Makes prediction based on forward pass. It returns the array of integers,
         where each item is the index of predicted character.
         """
-        _, ps = self.forward(x)
+        _, ps = self.forward(x, False)
         return np.argmax(ps, axis=1)
 
-    def calculate_loss(self, x: np.ndarray, labels: np.ndarray) -> float:
+    def calculate_loss(self, x: np.ndarray, labels: np.ndarray, update_state: bool) -> float:
         """
         Calculates cross entropy loss using target characters indexes and network predictions for
         all characters: loss = ∑ -label_{t} * log(predicted_probability_{t})
         """
-        _, ps = self.forward(x)
+        _, ps = self.forward(x, update_state)
         return -sum(np.log(ps[i][labels[i], 0]) for i in range(len(labels)))
 
     # ### Backward pass ###
@@ -275,7 +293,7 @@ class RNN:
 
             # calculating the gradients using backpropagation, aka analytic gradients
 
-        hs, ps = self.forward(x)
+        hs, ps = self.forward(x, False)
         analytic_gradients = self.backward(x, labels, hs, ps)
         self.reset_current_state()
 
@@ -301,18 +319,16 @@ class RNN:
                 original_value = parameter[ix]
 
                 # estimating numeric gradients
-                # numeric_grad = (f(x + delta) - f(x - delta)) / (2 * delta)
 
                 # x + delta
                 parameter[ix] = original_value + delta
-                loss_plus = self.calculate_loss(x, labels)
-                self.reset_current_state()
+                loss_plus = self.calculate_loss(x, labels, False)
 
                 # x - delta
                 parameter[ix] = original_value - delta
-                loss_minus = self.calculate_loss(x, labels)
-                self.reset_current_state()
+                loss_minus = self.calculate_loss(x, labels, False)
 
+                # numeric_gradient = (f(x + delta) - f(x - delta)) / (2 * delta)
                 numeric_gradient = (loss_plus - loss_minus) / (2 * delta)
 
                 # resetting parameter to original value
@@ -337,45 +353,6 @@ class RNN:
 
         return True
 
-    # implementation by Andrej Kharpaty
-    def lossFun(self, inputs, targets, hprev):
-        """
-        inputs,targets are both list of integers.
-        hprev is Hx1 array of initial hidden state
-        returns the loss, gradients on model parameters, and last hidden state
-        """
-        xs, hs, ys, ps = {}, {}, {}, {}
-        hs[-1] = np.copy(hprev)
-        loss = 0
-        # forward pass
-        for t in range(len(inputs)):
-            xs[t] = np.zeros((vocab_size, 1))  # encode in 1-of-k representation
-            xs[t][inputs[t]] = 1
-            hs[t] = np.tanh(
-                np.dot(self.w_hx, xs[t]) + np.dot(self.w_hh, hs[t - 1]))  # hidden state
-            ys[t] = np.dot(self.w_hy, hs[t])  # unnormalized log probabilities for next chars
-            ps[t] = np.exp(ys[t]) / np.sum(np.exp(ys[t]))  # probabilities for next chars
-            loss += -np.log(ps[t][targets[t], 0])  # softmax (cross-entropy loss)
-        # backward pass: compute gradients going backwards
-        dWxh, dWhh, dWhy = np.zeros_like(self.w_hx), np.zeros_like(self.w_hh), np.zeros_like(
-            self.w_hy)
-
-        dhnext = np.zeros_like(hs[0])
-        for t in reversed(range(len(inputs))):
-            dy = np.copy(ps[t])
-            dy[targets[t]] -= 1
-
-            # backprop into y. see http://cs231n.github.io/neural-networks-case-study/#grad
-            dWhy += np.dot(dy, hs[t].T)
-            dh = np.dot(self.w_hy.T, dy) + dhnext  # backprop into h
-            dhraw = (1 - hs[t] * hs[t]) * dh  # backprop through tanh nonlinearity
-            dWxh += np.dot(dhraw, xs[t].T)
-            dWhh += np.dot(dhraw, hs[t - 1].T)
-            dhnext = np.dot(self.w_hh.T, dhraw)
-        # for dparam in [dWxh, dWhh, dWhy, dbh, dby]:
-        #     np.clip(dparam, -5, 5, out=dparam)  # clip to mitigate exploding gradients
-        return loss, dWxh, dWhh, dWhy, hs[len(inputs) - 1]
-
     # ### Gradient descent ###
 
     def sgd_step(self,
@@ -399,11 +376,11 @@ class RNN:
          - backward pass
          - sgd update
         """
-        hs, ps = self.forward(x)
+        hs, ps = self.forward(x, True)
         dw_hx, dw_hh, dw_hy = self.backward(x, labels, hs, ps)
         self.sgd_step(dw_hx, dw_hh, dw_hy, lr)
 
-    def sample(self, seed_ix: int, n: int) -> List[int]:
+    def generate(self, seed_ix: int, n: int) -> List[int]:
         """
         Sample a sequence of integers from the model.
         :param seed_ix: seed letter for first time step
@@ -417,56 +394,106 @@ class RNN:
         sample_indexes = []
         ix = seed_ix
         for t in range(n):
-            _, ps = self.forward(np.array([ix]))
+            _, ps = self.forward(np.array([ix]), True)
             ix = np.random.choice(possible_indexes, p=ps[0].ravel())
-            sample_indexes.append(ix)
+            sample_indexes.append(possible_indexes[ix])
         return sample_indexes
 
+    # implementation by Andrej Kharpaty, for performing check
+
+    def lossFun(self, inputs, targets, hprev):
+        """
+        inputs,targets are both list of integers.
+        hprev is Hx1 array of initial hidden state
+        returns the loss, gradients on model parameters, and last hidden state
+        """
+        xs, hs, ys, ps = {}, {}, {}, {}
+        hs[-1] = np.copy(hprev)
+        loss = 0
+
+        # forward pass
+        for t in range(len(inputs)):
+            xs[t] = np.zeros((vocab_size, 1))  # encode in 1-of-k representation
+            xs[t][inputs[t]] = 1
+            hs[t] = np.tanh(
+                np.dot(self.w_hx, xs[t]) + np.dot(self.w_hh, hs[t - 1]))  # hidden state
+            ys[t] = np.dot(self.w_hy, hs[t])  # unnormalized log probabilities for next chars
+            ps[t] = np.exp(ys[t]) / np.sum(np.exp(ys[t]))  # probabilities for next chars
+            loss += -np.log(ps[t][targets[t], 0])  # softmax (cross-entropy loss)
+
+        # backward pass: compute gradients going backwards
+        dWxh = np.zeros_like(self.w_hx)
+        dWhh = np.zeros_like(self.w_hh)
+        dWhy = np.zeros_like(self.w_hy)
+
+        dhnext = np.zeros_like(hs[0])
+        for t in reversed(range(len(inputs))):
+            dy = np.copy(ps[t])
+            dy[targets[t]] -= 1
+
+            # backprop into y. see http://cs231n.github.io/neural-networks-case-study/#grad
+            dWhy += np.dot(dy, hs[t].T)
+            dh = np.dot(self.w_hy.T, dy) + dhnext  # backprop into h
+            dhraw = (1 - hs[t] * hs[t]) * dh  # backprop through tanh nonlinearity
+            dWxh += np.dot(dhraw, xs[t].T)
+            dWhh += np.dot(dhraw, hs[t - 1].T)
+            dhnext = np.dot(self.w_hh.T, dhraw)
+
+        # clip to mitigate exploding gradients
+        for dparam in [dWxh, dWhh, dWhy]:
+            np.clip(dparam, -5, 5, out=dparam)
+        return loss, dWxh, dWhh, dWhy, hs[len(inputs) - 1]
+
+
 if __name__ == '__main__':
-    n = 25
-    data = open('input.txt', 'r').read()  # should be simple plain text file
+    # should be simple plain text file
+    file = open('input.txt', 'r')
+    data = file.read()
+    file.close()
 
     chars = list(set(data))
     data_size, vocab_size = len(data), len(chars)
-    print('data has %d characters, %d unique.' % (data_size, vocab_size))
+
+    print(f'Data has {data_size} characters, {vocab_size} unique.')
     char_to_ix = {ch: i for i, ch in enumerate(chars)}
     ix_to_char = {i: ch for i, ch in enumerate(chars)}
 
+    n = 25
     inputs = np.array([char_to_ix[x] for x in data[:n]])
     labels = np.array([char_to_ix[x] for x in data[1:n + 1]])
 
     rnn = RNN(vocab_size, 10)
-    states, p_probs = rnn.forward(inputs)
+
+    # current implementation
+    hs, ps = rnn.forward(inputs, False)
+    l_1 = rnn.calculate_loss(inputs, labels, False)
+    dw_hx_1, dw_hh_1, dw_hy_1 = rnn.backward(inputs, labels, hs, ps)
+
+    # Karpathy implementation
+    l_2, dw_hx_2, dw_hh_2, dw_hy_2, _ = rnn.lossFun(inputs, labels, np.zeros((10, 1)))
+
+    print()
+    print('Checking current implementation with Karpathy implementation.')
+
+    print()
+    print('loss_1={:.5f}'.format(l_1))
+    print('loss_2={:.5f}'.format(l_2))
+    assert l_1 == l_2
+    print('loss check is passed')
+
+    print()
+    assert np.allclose(dw_hx_1, dw_hx_2, atol=1e-10)
+    print('dWxh check is passed')
+
+    print()
+    assert np.allclose(dw_hh_1, dw_hh_2, atol=1e-10)
+    print('dWhh check is passed')
+
+    print()
+    assert np.array_equal(dw_hy_1, dw_hy_2)
+    print('dWhy check is passed')
 
     rnn.reset_current_state()
-    l_1 = rnn.calculate_loss(inputs, labels)
-    print('loss_1={:.5f}'.format(l_1))
-
-    dw_hx_1, dw_hh_1, dw_hy_1 = rnn.backward(inputs, labels, states, p_probs)
-
-    l_2, dWxh_2, dWhh_2, dWhy_2, _ = rnn.lossFun(inputs, labels, np.zeros((10, 1)))
-    print('loss_2={:.5f}'.format(l_2))
-
-    print()
-    print('loss')
-    print(l_1 == l_2)
-
-    #
-    print()
-    print('dWxh')
-    assert np.all(np.isclose(dw_hx_1, dWxh_2, atol=1e-10))
-    # print(dw_hx_1 - dWxh_2)
-    #
-    print()
-    print('dWhh')
-    assert np.all(np.isclose(dw_hh_1, dWhh_2, atol=1e-10))
-
-    #
-    print()
-    print('dWhy')
-    assert np.array_equal(dw_hy_1, dWhy_2)
-
-    rnn.current_state = np.zeros_like(rnn.current_state)
     rnn.gradient_check(np.array([0, 1, 2, 3, 4]), np.array([1, 2, 3, 4, 5]))
 
     # http://willwolf.io/2016/10/18/recurrent-neural-network-gradients-and-lessons-learned-therein/
@@ -477,5 +504,3 @@ if __name__ == '__main__':
     # http://www.wildml.com/2015/09/implementing-a-neural-network-from-scratch/
     # https://towardsdatascience.com/character-level-language-model-1439f5dd87fe
     # https://peterroelants.github.io/posts/rnn-implementation-part01/
-    
-    print(rnn.sample(10, 5))

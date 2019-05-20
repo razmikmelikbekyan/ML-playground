@@ -1,4 +1,5 @@
-from typing import Tuple, Dict
+from typing import Tuple, Dict, List
+import matplotlib.pyplot as plt
 
 import numpy as np
 
@@ -18,6 +19,16 @@ def relu(x: np.ndarray) -> np.ndarray:
 def tanh(x: np.ndarray) -> np.ndarray:
     return np.tanh(x)
 
+def plot_loss(losses: List):
+    """PLots losses."""
+    _, epoch, loss = zip(*losses)
+    plt.figure(figsize=(15, 15))
+    plt.title('Loss over epochs')
+    plt.plot(epoch, loss)
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.tight_layout()
+    plt.show()
 
 def read_in_chunks(data_path: str, chunk_size: int, offset: int):
     """Lazy function (generator) to read a file piece by piece. It is needed in order to
@@ -59,3 +70,5 @@ def get_inputs_targets(data_path: str,
         if len(y) < sequence_length:
             x = x[:-1]
         yield [char_to_ix[ch] for ch in x.lower()], [char_to_ix[ch] for ch in y.lower()]
+
+

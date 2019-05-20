@@ -1,16 +1,16 @@
 import argparse
 import json
-from typing import Dict
+from typing import Dict, Tuple, List
 
 from rnn import RNN
-from utils import get_support_data, get_inputs_targets
+from utils import get_support_data, get_inputs_targets, plot_loss
 
 
 def train_with_sgd(params: Dict,
                    data_path: str,
                    lr: float = 0.005,
                    epochs: int = 100,
-                   evaluate_loss_after: int = 5):
+                   evaluate_loss_after: int = 5) -> Tuple[RNN, List]:
     """
     Initializes RNN model with given params, rains given model using given data set.
     :param params: the RNN model params dict,
@@ -24,6 +24,7 @@ def train_with_sgd(params: Dict,
     """
 
     vocabulary_size, char_to_ix, ix_to_char = get_support_data(data_path)
+    print('Vocabulary size={}'.format(vocabulary_size))
     hidden_size, non_linearity, sequence_length = (params['hidden_size'],
                                                    params['non_linearity'],
                                                    params['sequence_length'])
@@ -37,24 +38,27 @@ def train_with_sgd(params: Dict,
     for epoch in range(epochs):
         if epoch % evaluate_loss_after == 0:
             epoch_loss = sum([
-                model.calculate_loss(x, y)
+                model.calculate_loss(x, y, True)
                 for x, y in get_inputs_targets(data_path, sequence_length, char_to_ix)
             ])
-            losses.append((num_examples_seen, epoch_loss))
-            print(f"Loss after num_examples_seen={num_examples_seen} epoch={epoch}: {epoch_loss}")
+            losses.append((num_examples_seen, epoch, epoch_loss))
+            print("Loss after num_examples_seen={} epoch={}: {:.2f}".format(
+                num_examples_seen, epoch, epoch_loss))
 
             # Adjust the learning rate if loss increases
-            if len(losses) > 1 and losses[-1][1] > losses[-2][1]:
+            if len(losses) > 1 and losses[-1][-1] > losses[-2][-1]:
                 lr *= 0.5
                 print(f"Setting learning rate to {lr}.")
 
-        # performing training of model
+        # performing training of model for current epoch
         model.reset_current_state()
         for x, y in get_inputs_targets(data_path, params['sequence_length'], char_to_ix):
             model.train(x, y, lr)
             num_examples_seen += 1
 
-    print(''.join(ix_to_char[ix] for ix in model.sample(7, 100)))
+    print('\nGenerated sample from model:')
+    print(''.join(ix_to_char[ix] for ix in model.generate(20, 200)))
+    return model, losses
 
 
 parser = argparse.ArgumentParser()
@@ -65,14 +69,21 @@ parser.add_argument('--epochs', type=int, default=100,
                     help='The number of epochs to train the model.')
 parser.add_argument('--loss-evaluation-epochs', type=int, default=5,
                     help='evaluate the loss after this many epochs')
+parser.add_argument('--saving-path', type=str, default='data/trained_model.npy',
+                    help='Model saving path.')
 
 
 def main(args):
     with open(args.params, 'r') as f:
         params = json.load(f)
 
-    train_with_sgd(params, args.data, lr=args.lr, epochs=args.epochs,
-                   evaluate_loss_after=args.loss_evaluation_epochs)
+    model, losses, = train_with_sgd(params, args.data,
+                                    lr=args.lr,
+                                    epochs=args.epochs,
+                                    evaluate_loss_after=args.loss_evaluation_epochs)
+    model.save(args.saving_path)
+
+    plot_loss(losses)
 
 
 if __name__ == '__main__':
