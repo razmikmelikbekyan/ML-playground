@@ -470,4 +470,12 @@ if __name__ == '__main__':
     rnn.gradient_check(np.array([0, 1, 2, 3, 4]), np.array([1, 2, 3, 4, 5]))
 
     # http://willwolf.io/2016/10/18/recurrent-neural-network-gradients-and-lessons-learned-therein/
+    # https://github.com/dennybritz/rnn-tutorial-rnnlm
+    # https://github.com/dennybritz/nn-theano/blob/master/nn-theano.ipynb
+    # https://github.com/sar-gupta/rnn-from-scratch/blob/master/rnn.py
+    # http://karpathy.github.io/2015/05/21/rnn-effectiveness/
+    # http://www.wildml.com/2015/09/implementing-a-neural-network-from-scratch/
+    # https://towardsdatascience.com/character-level-language-model-1439f5dd87fe
+    # https://peterroelants.github.io/posts/rnn-implementation-part01/
+    
     print(rnn.sample(10, 5))

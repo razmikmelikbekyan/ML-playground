@@ -54,6 +54,8 @@ def train_with_sgd(params: Dict,
             model.train(x, y, lr)
             num_examples_seen += 1
 
+    print(''.join(ix_to_char[ix] for ix in model.sample(7, 100)))
+
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--params', type=str, required=True, help='The model params json path.')
