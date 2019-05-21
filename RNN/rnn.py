@@ -2,20 +2,21 @@ from typing import Tuple, Dict, List
 
 import numpy as np
 
-from utils import softmax, sigmoid, tanh, relu
+from utils import (softmax, sigmoid, tanh, relu, dsigmoid, drelu, dtanh,
+                   one_hot_encode, check_relative_difference)
 
 
 class RNN:
     """
-    This class represents simple Recurrent Neural Network implementation for  for
-    character-level language model. In this model the purpose of the network is correctly
-    predicting the next character, given the previous one.
+    This class represents simple Recurrent Neural Network implementation for
+    character-level language model. The purpose of the network is correctly predicting the next
+    character, given the previous sequence of characters.
     """
 
     activations = {
-        'tanh': tanh,
-        'sigmoid': sigmoid,
-        'relu': relu
+        'tanh': (tanh, dtanh),
+        'sigmoid': (sigmoid, dsigmoid),
+        'relu': (relu, drelu)
     }
 
     def __init__(self,
@@ -34,7 +35,9 @@ class RNN:
 
         self.vocabulary_size = vocabulary_size
         self.hidden_size = hidden_size
-        self.non_linearity = non_linearity
+
+        # activation function and its dervivate w.r.t. its direct input
+        self.f, self.f_prime = self.activations[non_linearity]
 
         # randomly initializing weights
 
@@ -55,39 +58,6 @@ class RNN:
 
         # setting the current state
         self.current_state = np.zeros((self.hidden_size, 1))
-
-    def save(self, saving_path: str):
-        """Saves model."""
-        params = [self.w_hx, self.w_hh, self.w_hy, self.current_state]
-        np.save(saving_path, params)
-        print(f'Model has been save at the following path: {saving_path}.')
-
-    @staticmethod
-    def load(model_path: str):
-        """Loads saved model and returns it."""
-        w_hx, w_hh, w_hy, current_state = np.load(model_path)
-        _, vocabulary_size = w_hx.shape
-        hidden_size, hidden_size = w_hh.shape
-        model = RNN(vocabulary_size, hidden_size)
-        model.w_hx, model.w_hh, model.w_hy, model.current_state = w_hx, w_hh, w_hy, current_state
-        return model
-
-    def _one_hot_encode(self, x: np.ndarray) -> np.ndarray:
-        """
-        Given the array of inputs or labels, where each item is the index of character. Performs
-        one hot encoding, aka returns the matrix with dimensions (len(x), vocabulary_size). Each
-        row of the matrix consists of 0s and only one 1. The 1 is located at the index of the cor-
-        responding correct character.
-        """
-        n_rows = len(x)
-
-        # here we manually add 1 at the end, in order to have each row of the matrix as a
-        # matrix, instead of vector, for properly calculating dot products
-        # for example, if self.vocabulary_size = 15, then the each row should have the
-        # size - (15, 1), (without additional 1, it will have size - (15, )
-        one_hot_encoded = np.zeros((n_rows, self.vocabulary_size, 1))
-        one_hot_encoded[(np.arange(n_rows), x)] = 1
-        return one_hot_encoded
 
     def reset_current_state(self):
         """Resets current state to zeros."""
@@ -114,10 +84,7 @@ class RNN:
                                            vocabulary, size = (sequence length, vocabulary size)
         """
         # one hot encoding of input
-        inputs_matrix = self._one_hot_encode(x)
-
-        # activation function
-        f = self.activations[self.non_linearity]
+        inputs_matrix = one_hot_encode(x, self.vocabulary_size)
 
         ps, hs = {}, {}  # predicted probabilities and hidden states
         hs[-1] = self.current_state  # setting the current state
@@ -127,7 +94,7 @@ class RNN:
 
             # state at t
             z_t = np.dot(self.w_hh, h_t_1) + np.dot(self.w_hx, inputs_matrix[t])
-            h_t = f(z_t)  # dim : (self.hidden_size, 1)
+            h_t = self.f(z_t)  # dim : (self.hidden_size, 1)
 
             # prediction from hidden state at t
             y_t = np.dot(self.w_hy, h_t)  # unnormalized log probabilities for next chars
@@ -140,14 +107,6 @@ class RNN:
             self.current_state = hs[len(x) - 1]  # updating the current state
         return hs, ps
 
-    def predict(self, x: np.ndarray) -> np.ndarray:
-        """
-        Makes prediction based on forward pass. It returns the array of integers,
-        where each item is the index of predicted character.
-        """
-        _, ps = self.forward(x, False)
-        return np.argmax(ps, axis=1)
-
     def calculate_loss(self, x: np.ndarray, labels: np.ndarray, update_state: bool) -> float:
         """
         Calculates cross entropy loss using target characters indexes and network predictions for
@@ -158,64 +117,10 @@ class RNN:
 
     # ### Backward pass ###
 
-    def _calculate_h_grad_wrt_z(self, h_t: np.ndarray) -> np.ndarray:
-        """
-        Calculates state gradient w.r.t. z, dh / dz.
-        Note that h_{t} = tanh(z_{t}) or h_{t} = sigmoid(z_{t}) or h_{t} = relu(z_{t})"""
-
-        if self.non_linearity == 'tanh':
-            # h = tanh(z)
-            # dh / dz = (1 - tanh^2(z)) = 1 - h^2
-            return 1 - h_t ** 2
-        elif self.non_linearity == 'sigmoid':
-            # h = sigmoid(z)
-            # dh / dz = sigmoid(z)(1 - sigmoid(z)) = h * (1 - h)
-            return h_t * (1 - h_t)
-        else:
-            # h = relu(z) = (z > 0) * z
-            # dh / dz = (z > 0) * 1, so if we can just replace all non zero elements in h with 1
-            y = h_t.copy()
-            y[y != 0] = 1
-            return y
-
-    def _calculate_loss_grad_wrt_z(self, dh_t: np.ndarray, hs: Dict, t: int):
-        """
-        Calculates dloss_{t} / dz_{k} for all k from 1 to t.
-
-        The basic forward pass and loss are the following:
-
-        z_{t} = w_hh * h_{t-1} + w_hx * x_{t}
-        h_{t} = f(z_{t})
-        y_{t} = w_hy * h_{t}
-        p_{t} = softmax(y_{t})
-        loss_{t} = -labels_{t} * log(p_{t})
-
-        If we change w_hh or w_hx, then it will affect on all z_{k} for all k from 1 to t. So in
-        order to calculate dloss_{t} / dw_hh we will need dloss_{t} / dz_{k} for all k from 1 to t
-        gradients. So this function calculates the gradient of loss at time t w.r.t. all z_{k}
-        for all k from 1 to t.
-
-        :param dh_t: dloss_{t} / dh_{t}, aka loss gradient w.r.t state for the same time index t
-        :param hs: array of states
-        :param t: time index
-        :return: list of arrays, where each array is the calculated gradient:
-                 [dloss_{t} / dz_{t}, dloss_{t} / dz_{t - 1}, ..., dloss_{t} / dz_{1}]
-        """
-
-        # dl / dz = (dl / dh) * (dh / dz)
-        dz_t = dh_t * self._calculate_h_grad_wrt_z(hs[t])
-
-        grads = [dz_t]
-        for i in reversed(range(t)):
-            # dl / dz_(t-1) = (dl / dz_{t})(dz_{t} / dh_{t-1}) * (dh_{t-1) / dz_{t-1})
-            dz_i = np.dot(self.w_hh.T, grads[-1]) * self._calculate_h_grad_wrt_z(hs[i])
-            grads.append(dz_i)
-        return grads
-
     def backward(self, x: np.ndarray, labels: np.ndarray, hs: Dict, ps: Dict):
         """
-        Makes backward pass through the network. Returns the gradients of loss w.r.t. network
-        parameters -  w_hx, w_hh, w_hy.
+        Makes backward pass through the network.
+        Returns the gradients of loss w.r.t. network parameters -  w_hx, w_hh, w_hy.
 
         :param x: the array of input characters, where each item is the index of character, the
                   size of array will be the sequence length
@@ -226,8 +131,8 @@ class RNN:
                    (the second output of the self.forward method)
         :return: gradients of w_hx, w_hh, w_hy
         """
-        inputs_matrix = self._one_hot_encode(x)
-        labels_matrix = self._one_hot_encode(labels)
+        inputs_matrix = one_hot_encode(x, self.vocabulary_size)
+        labels_matrix = one_hot_encode(labels, self.vocabulary_size)
 
         dw_hx = np.zeros_like(self.w_hx)
         dw_hh = np.zeros_like(self.w_hh)
@@ -237,28 +142,27 @@ class RNN:
             # dl / dy = p - label
             dy_t = ps[t] - labels_matrix[t]
 
-            # dl / dh = (dl / dy) (dy / dh) = (p - label)w_hy
-            dh_t = np.dot(self.w_hy.T, dy_t)
-
-            # dl / dz_{k} for all k from 1 to t
-            dz_t_1 = self._calculate_loss_grad_wrt_z(dh_t, hs, t)
-
-            # dl / dw_hy = (dl / dy) * (dl * dw_hy)
+            # dl / dw_hy = (dl / dy) * (dy / dw_hy)
             dw_hy += np.dot(dy_t, hs[t].T)
 
-            # dl / dw_hh = ∑ (dl / dz_{k}) * (dz_{k} / dw_hy) for all k from 1 to t
-            # (dz_{k} / dw_hy) = h_{t-1}
-            dw_hh += sum(
-                np.dot(dz_i, hs[i - 1].T)
-                for dz_i, i in zip(dz_t_1, reversed(range(t + 1)))
-            )
+            # dl / dh = (dl / dy) * (dy / dh) = (p - label) * w_hy
+            dh_t = np.dot(self.w_hy.T, dy_t)
 
+            # dl / dz_{k} = (dl / dh_{k}) * (dh_{k} / dz_{k}) = dh_{t} * (dh_{k} / dz_{k}), when t = k
+            dz_k = dh_t * self.f_prime(hs[t])
+
+            # dl / dw_hh = ∑ (dl / dz_{k}) * (dz_{k} / dw_hh) for all k from 1 to t
             # dl / dw_hx = ∑ (dl / dz_{k}) * (dz_{k} / dw_hx) for all k from 1 to t
-            # (dz_{k} / dw_hx) = x_{t}
-            dw_hx += sum(
-                np.dot(dz_i, inputs_matrix[i].T)
-                for dz_i, i in zip(dz_t_1, reversed(range(t + 1)))
-            )
+            for k in reversed(range(t + 1)):
+                # (dl / dz_{k}) (dz_{k} / dw_hh) = dz_k * h_{k-1}
+                dw_hh += np.dot(dz_k, hs[k - 1].T)
+
+                # (dl / dz_{k}) (dz_{k} / dw_h) = dz_k * x_{k}
+                dw_hx += np.dot(dz_k, inputs_matrix[k].T)
+
+                # updating dz_k using all previous derivatives (from t to t - k)
+                # dl / dz_(k-1) = (dl / dz_{k})(dz_{k} / dh_{k-1}) * (dh_{k-1) / dz_{k-1})
+                dz_k = np.dot(self.w_hh.T, dz_k) * self.f_prime(hs[k - 1])
 
         # clip to mitigate exploding gradients
         for d_param in (dw_hx, dw_hh, dw_hy):
@@ -287,12 +191,7 @@ class RNN:
         :return: True if numerical gradient and analytic gradient are almost equal, else False
         """
 
-        def check_relative_difference(a, b, threshold):
-            """Returns True if (|a - b| / (|a| + |b|)) > threshold else False."""
-            return np.abs(a - b) > threshold * (np.abs(a) + np.abs(b))
-
-            # calculating the gradients using backpropagation, aka analytic gradients
-
+        # calculating the gradients using backpropagation, aka analytic gradients
         hs, ps = self.forward(x, False)
         analytic_gradients = self.backward(x, labels, hs, ps)
         self.reset_current_state()
@@ -355,30 +254,23 @@ class RNN:
 
     # ### Gradient descent ###
 
-    def sgd_step(self,
-                 dw_hx: np.ndarray,
-                 dw_hh: np.ndarray,
-                 dw_hy: np.ndarray,
-                 lr: float):
+    def sgd_step(self, x: np.ndarray, labels: np.ndarray, lr: float):
         """
-        Performs gradient descent step, for w_hx, w_hh, w_hy.
+        Performs gradient descent step for model parameters: w_hx, w_hh, w_hy.
 
-        w_new = w_old - lr * dloss / dw_old
+        - forward pass: calculating next char probabilities, given previous sequence of chars
+        - backward pass: calculating loss and its gradient w.r.t. model params
+        - sgd update: update params in the opposite of the gradient direction
         """
+        hs, ps = self.forward(x, True)
+        dw_hx, dw_hh, dw_hy = self.backward(x, labels, hs, ps)
+
+        # w <-- w - lr * dloss / dw
         self.w_hx -= lr * dw_hx
         self.w_hh -= lr * dw_hh
         self.w_hy -= lr * dw_hy
 
-    def train(self, x: np.ndarray, labels: np.ndarray, lr: float):
-        """
-        Performs training of model:
-         - forward pass
-         - backward pass
-         - sgd update
-        """
-        hs, ps = self.forward(x, True)
-        dw_hx, dw_hh, dw_hy = self.backward(x, labels, hs, ps)
-        self.sgd_step(dw_hx, dw_hh, dw_hy, lr)
+    # ### Sampling ###
 
     def generate(self, seed_ix: int, n: int) -> List[int]:
         """
@@ -388,6 +280,7 @@ class RNN:
         :return: list of indexes
         """
         assert isinstance(seed_ix, int) and self.vocabulary_size > seed_ix >= 0
+        self.reset_current_state()
 
         possible_indexes = np.arange(self.vocabulary_size)
 
@@ -398,6 +291,24 @@ class RNN:
             ix = np.random.choice(possible_indexes, p=ps[0].ravel())
             sample_indexes.append(possible_indexes[ix])
         return sample_indexes
+
+    # ### Saving and Loading model ###
+
+    def save(self, saving_path: str):
+        """Saves model."""
+        params = [self.w_hx, self.w_hh, self.w_hy, self.current_state]
+        np.save(saving_path, params)
+        print(f'Model has been save at the following path: {saving_path}.')
+
+    @staticmethod
+    def load(model_path: str):
+        """Loads saved model and returns it."""
+        w_hx, w_hh, w_hy, current_state = np.load(model_path)
+        _, vocabulary_size = w_hx.shape
+        hidden_size, hidden_size = w_hh.shape
+        model = RNN(vocabulary_size, hidden_size)
+        model.w_hx, model.w_hh, model.w_hy, model.current_state = w_hx, w_hh, w_hy, current_state
+        return model
 
     # implementation by Andrej Kharpaty, for performing check
 
@@ -447,7 +358,7 @@ class RNN:
 
 if __name__ == '__main__':
     # should be simple plain text file
-    file = open('input.txt', 'r')
+    file = open('data/input.txt', 'r')
     data = file.read()
     file.close()
 

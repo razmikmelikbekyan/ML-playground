@@ -1,6 +1,6 @@
 from typing import Tuple, Dict, List
-import matplotlib.pyplot as plt
 
+import matplotlib.pyplot as plt
 import numpy as np
 
 
@@ -19,28 +19,91 @@ def relu(x: np.ndarray) -> np.ndarray:
 def tanh(x: np.ndarray) -> np.ndarray:
     return np.tanh(x)
 
-def plot_loss(losses: List):
-    """PLots losses."""
-    _, epoch, loss = zip(*losses)
-    plt.figure(figsize=(15, 15))
-    plt.title('Loss over epochs')
-    plt.plot(epoch, loss)
-    plt.xlabel('Epoch')
-    plt.ylabel('Loss')
-    plt.tight_layout()
-    plt.show()
 
-def read_in_chunks(data_path: str, chunk_size: int, offset: int):
-    """Lazy function (generator) to read a file piece by piece. It is needed in order to
-    optimize memory consumption due to big files."""
+def dsigmoid(y: np.ndarray) -> np.ndarray:
+    # y = sigmoid(x)
+    # dy / dx = sigmoid(x)(1 - sigmoid(x)) = y * (1 - y)
+    return y * (1 - y)
+
+
+def drelu(y: np.ndarray) -> np.ndarray:
+    # y = relu(x) = (x > 0) * x
+    # dy / dx = (x > 0) * 1, so we can just replace all non zero elements in y with 1
+    dy = y.copy()
+    dy[dy != 0] = 1.
+    return dy
+
+
+def dtanh(y: np.ndarray) -> np.ndarray:
+    # y = tanh(x)
+    # dy / dx = (1 - tanh^2(x)) = 1 - y^2
+    return 1 - y ** 2
+
+
+def one_hot_encode(x: np.ndarray, size: int) -> np.ndarray:
+    """
+    Given the x array of inputs or labels, where each item is the index of character. Performs
+    one hot encoding, aka returns the matrix with dimensions (len(x), size). Each row of the matrix
+    consists of 0s and only one 1. The 1 is located at the index of the corresponding correct
+    character.
+    """
+    n_rows = len(x)
+
+    # here we manually add 1 at the end, in order to have each row of the matrix as a
+    # matrix, instead of vector, for properly calculating dot products
+    # for example, if size = 15, then the each row should have the
+    # size - (15, 1), (without additional 1, it will have size - (15, )
+    one_hot_encoded = np.zeros((n_rows, size, 1))
+    one_hot_encoded[(np.arange(n_rows), x)] = 1
+    return one_hot_encoded
+
+
+def check_relative_difference(a: np.ndarray or float, b: np.ndarray or float, threshold: float):
+    """Returns True if (|a - b| / (|a| + |b|)) > threshold else False."""
+    return np.abs(a - b) > threshold * (np.abs(a) + np.abs(b))
+
+
+def read_in_chunks(data_path: str, chunk_size: int, offset: int, full_sequences: bool):
+    """
+    Lazy function (generator) to read a file piece by piece. It is needed in order to optimize
+    memory consumption due to big files.
+
+    If full_sequences is True, it will read file [
+
+    """
     file_object = open(data_path, 'r')
+    counter = 0
     if offset:
         file_object.seek(offset, 0)
+        counter += offset
     while True:
         data = file_object.read(chunk_size)
         if not data:
             break
         yield data
+
+        # if full_sequences is True, i
+        if full_sequences:
+            counter += 1
+            file_object.seek(counter, 0)
+
+    file_object.close()
+
+def read_in_full_chunks(data_path: str, chunk_size: int, offset: int):
+    """Lazy function (generator) to read a file piece by piece. It is needed in order to
+    optimize memory consumption due to big files."""
+    file_object = open(data_path, 'r')
+    counter = 0
+    if offset:
+        file_object.seek(offset, 0)
+        counter += offset
+    while True:
+        data = file_object.read(chunk_size)
+        if not data:
+            break
+        yield data
+
+
     file_object.close()
 
 
@@ -72,3 +135,13 @@ def get_inputs_targets(data_path: str,
         yield [char_to_ix[ch] for ch in x.lower()], [char_to_ix[ch] for ch in y.lower()]
 
 
+def plot_loss(losses: List):
+    """PLots losses."""
+    _, epoch, loss = zip(*losses)
+    plt.figure(figsize=(15, 15))
+    plt.title('Loss over epochs')
+    plt.plot(epoch, loss)
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.tight_layout()
+    plt.show()

@@ -20,7 +20,7 @@ def train_with_sgd(params: Dict,
     :param lr: initial learning rate for SGD
     :param epochs: number of times to iterate through the complete data set
     :param evaluate_loss_after: evaluate the loss after this many epochs
-    :return:
+    :return: trained model and list of losses
     """
 
     vocabulary_size, char_to_ix, ix_to_char = get_support_data(data_path)
@@ -42,6 +42,7 @@ def train_with_sgd(params: Dict,
                 for x, y in get_inputs_targets(data_path, sequence_length, char_to_ix)
             ])
             losses.append((num_examples_seen, epoch, epoch_loss))
+
             print("Loss after num_examples_seen={} epoch={}: {:.2f}".format(
                 num_examples_seen, epoch, epoch_loss))
 
@@ -53,7 +54,7 @@ def train_with_sgd(params: Dict,
         # performing training of model for current epoch
         model.reset_current_state()
         for x, y in get_inputs_targets(data_path, params['sequence_length'], char_to_ix):
-            model.train(x, y, lr)
+            model.sgd_step(x, y, lr)
             num_examples_seen += 1
 
     print('\nGenerated sample from model:')
