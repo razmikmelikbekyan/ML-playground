@@ -148,7 +148,7 @@ class RNN:
             # dl / dh = (dl / dy) * (dy / dh) = (p - label) * w_hy
             dh_t = np.dot(self.w_hy.T, dy_t)
 
-            # dl / dz_{k} = (dl / dh_{k}) * (dh_{k} / dz_{k}) = dh_{t} * (dh_{k} / dz_{k}), when t = k
+            # dl / dz_{k} = (dl / dh_{k}) * (dh_{k} / dz_{k}) = dh_{t} * (dh_{k} / dz_{k})
             dz_k = dh_t * self.f_prime(hs[t])
 
             # dl / dw_hh = ∑ (dl / dz_{k}) * (dz_{k} / dw_hh) for all k from 1 to t

@@ -9,6 +9,7 @@ from utils import get_support_data, get_inputs_targets, plot_loss
 def train_with_sgd(params: Dict,
                    data_path: str,
                    lr: float = 0.005,
+                   full_sequences: bool = False,
                    epochs: int = 100,
                    evaluate_loss_after: int = 5) -> Tuple[RNN, List]:
     """
@@ -39,7 +40,8 @@ def train_with_sgd(params: Dict,
         if epoch % evaluate_loss_after == 0:
             epoch_loss = sum([
                 model.calculate_loss(x, y, True)
-                for x, y in get_inputs_targets(data_path, sequence_length, char_to_ix)
+                for x, y in get_inputs_targets(data_path, sequence_length,
+                                               char_to_ix, full_sequences)
             ])
             losses.append((num_examples_seen, epoch, epoch_loss))
 
@@ -53,7 +55,7 @@ def train_with_sgd(params: Dict,
 
         # performing training of model for current epoch
         model.reset_current_state()
-        for x, y in get_inputs_targets(data_path, params['sequence_length'], char_to_ix):
+        for x, y in get_inputs_targets(data_path, sequence_length, char_to_ix, full_sequences):
             model.sgd_step(x, y, lr)
             num_examples_seen += 1
 
@@ -66,6 +68,8 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--params', type=str, required=True, help='The model params json path.')
 parser.add_argument('--data', type=str, required=True, help='The data set path.')
 parser.add_argument('--lr', type=float, default=0.05, help='The learning rate for SGD.')
+parser.add_argument('--full-sequences', action='store_true',
+                    help='If True generates full sequences from data.')
 parser.add_argument('--epochs', type=int, default=100,
                     help='The number of epochs to train the model.')
 parser.add_argument('--loss-evaluation-epochs', type=int, default=5,
@@ -80,6 +84,7 @@ def main(args):
 
     model, losses, = train_with_sgd(params, args.data,
                                     lr=args.lr,
+                                    full_sequences=args.full_sequences,
                                     epochs=args.epochs,
                                     evaluate_loss_after=args.loss_evaluation_epochs)
     model.save(args.saving_path)
