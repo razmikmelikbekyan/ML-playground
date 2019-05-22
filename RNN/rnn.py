@@ -170,87 +170,91 @@ class RNN:
 
         return dw_hx, dw_hh, dw_hy
 
-    def gradient_check(self,
-                       x: np.ndarray,
-                       labels: np.ndarray,
-                       delta: float = 0.001,
-                       rel_error: float = 0.01,
-                       debug: bool = True):
+    def calculate_numeric_gradients(self, x: np.ndarray,
+                                    labels: np.ndarray,
+                                    epsilon: float) -> Tuple:
         """
-        Whenever you implement backpropagation it is good idea to also implement gradient checking,
-        which is a way of verifying that your implementation is correct. The idea behind gradient
-        checking is that derivative of a parameter is equal to the slope at the point, which we can
-        approximate by slightly changing the parameter and then dividing by the change:
+        Calculates numeric gradients w.r.t. model all parameters.
 
-        (dL / dtheta) ≈ (L(theta + delta) - L(theta - delta)) / (2 * delta)
+        (dL / dtheta) ≈ (L(theta + epsilon) - L(theta - epsilon)) / (2 * epsilon)
 
-        So we will change each parameter 'w_hx', 'w_hh', 'w_hy' by some small ±delta, calculate
-        the loss difference, divide it 2 * delta and compare with analytic gradient. Their
-        relative difference should be very small.
-
-        :return: True if numerical gradient and analytic gradient are almost equal, else False
+        :return: numeric gradients for dw_hx, dw_hh, dw_hy
         """
-
-        # calculating the gradients using backpropagation, aka analytic gradients
-        hs, ps = self.forward(x, False)
-        analytic_gradients = self.backward(x, labels, hs, ps)
         self.reset_current_state()
+        dw_hx_numeric = np.zeros_like(self.w_hx)
+        dw_hh_numeric = np.zeros_like(self.w_hh)
+        dw_hy_numeric = np.zeros_like(self.w_hy)
 
-        # parameters we want to check
-        model_parameters = ('w_hx', 'w_hh', 'w_hy')
+        d_params_numeric = (dw_hx_numeric, dw_hh_numeric, dw_hy_numeric)
+        params = (self.w_hx, self.w_hh, self.w_hy)
 
-        # gradient check for each parameter
-        for p_idx, p_name in enumerate(model_parameters):
-            # Get the actual parameter value from the mode, e.g. model.W
-            parameter = getattr(self, p_name)
-
-            if debug:
-                print()
-                print(f"Performing gradient check for parameter {p_name} "
-                      f"with size = {np.prod(parameter.shape)}.")
+        # calculating numerical gradients for each parameter
+        for d_param, param in zip(d_params_numeric, params):
 
             # iterate over each element of the parameter matrix, e.g. (0,0), (0,1), ...
-            it = np.nditer(parameter, flags=['multi_index'], op_flags=['readwrite'])
+            it = np.nditer(param, flags=['multi_index'], op_flags=['readwrite'])
             while not it.finished:
                 ix = it.multi_index
 
                 # keeping the original value so we can reset it later
-                original_value = parameter[ix]
+                original_value = param[ix]
 
                 # estimating numeric gradients
 
-                # x + delta
-                parameter[ix] = original_value + delta
+                # x + epsilon
+                param[ix] = original_value + epsilon
                 loss_plus = self.calculate_loss(x, labels, False)
 
-                # x - delta
-                parameter[ix] = original_value - delta
+                # x - epsilon
+                param[ix] = original_value - epsilon
                 loss_minus = self.calculate_loss(x, labels, False)
 
                 # numeric_gradient = (f(x + delta) - f(x - delta)) / (2 * delta)
-                numeric_gradient = (loss_plus - loss_minus) / (2 * delta)
+                d_param[ix] = (loss_plus - loss_minus) / (2 * epsilon)
 
                 # resetting parameter to original value
-                parameter[ix] = original_value
+                param[ix] = original_value
 
-                # the analytic_gradient for this parameter calculated using backpropagation
-                analytic_gradient = analytic_gradients[p_idx][ix]
-
-                # if the error is to large fail the gradient check
-                if check_relative_difference(analytic_gradient, numeric_gradient, rel_error):
-                    if debug:
-                        print(f"Gradient Check ERROR: parameter = {p_name} ix = {ix}")
-                        print(f"+ delta Loss: {loss_plus}")
-                        print(f"- delta Loss: {loss_minus}")
-                        print(f"Numeric gradient: {numeric_gradient}")
-                        print(f"Analytic gradient: {analytic_gradient}")
-                    return False
                 it.iternext()
 
-            if debug:
-                print(f"Gradient check for parameter {p_name} passed.")
+        return d_params_numeric
 
-        return True
+    def gradient_check(self,
+                       x: np.ndarray,
+                       labels: np.ndarray,
+                       epsilon: float = 1e-3,
+                       threshold: float = 1e-6):
+        """
+        Performs gradient checking for model parameters:
+
+         - computes the analytic gradients using our back-propagation implementation
+         - computes the numerical gradients using the two-sided epsilon method
+         - computes the relative difference between numerical and analytical gradients
+         - checks that the relative difference is less than threshold
+         - if the last check is failed, then raises an error
+
+        """
+        params = ('w_hx', 'w_hh', 'w_hy')
+
+        # calculating the gradients using backpropagation, aka analytic gradients
+        self.reset_current_state()
+        hs, ps = self.forward(x, False)
+        analytic_gradients = self.backward(x, labels, hs, ps)
+
+        # calculating numerical gradients
+        numeric_gradients = self.calculate_numeric_gradients(x, labels, epsilon)
+
+        # gradient check for each parameter
+        for p_name, d_analytic, d_numeric in zip(params, analytic_gradients, numeric_gradients):
+            print(f"\nPerforming gradient check for parameter {p_name} "
+                  f"with size = {np.prod(d_analytic.shape)}.")
+
+            if (not d_analytic.shape == d_numeric.shape or
+                    check_relative_difference(d_analytic, d_numeric, threshold)):
+                raise ValueError(f'Gradient check for {p_name} is failed.')
+
+            print(f"Gradient check for parameter {p_name} is passed.")
+
 
     # ### Gradient descent ###
 

@@ -19,6 +19,7 @@ def train_with_sgd(params: Dict,
 
     :param data_path: the data set path, it should be a txt file
     :param lr: initial learning rate for SGD
+    :param full_sequences: if True generates full sequences from data
     :param epochs: number of times to iterate through the complete data set
     :param evaluate_loss_after: evaluate the loss after this many epochs
     :return: trained model and list of losses
@@ -30,7 +31,7 @@ def train_with_sgd(params: Dict,
                                                    params['non_linearity'],
                                                    params['sequence_length'])
 
-    model = RNN(vocabulary_size, params['hidden_size'], non_linearity=params['non_linearity'])
+    model = RNN(vocabulary_size, hidden_size, non_linearity=non_linearity)
 
     # keep track of the losses so we can plot them later
     losses = []

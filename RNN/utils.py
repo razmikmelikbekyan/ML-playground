@@ -58,9 +58,9 @@ def one_hot_encode(x: np.ndarray, size: int) -> np.ndarray:
     return one_hot_encoded
 
 
-def check_relative_difference(a: np.ndarray or float, b: np.ndarray or float, threshold: float):
+def check_relative_difference(a: np.ndarray, b: np.ndarray, threshold: float) -> bool:
     """Returns True if (|a - b| / (|a| + |b|)) > threshold else False."""
-    return np.abs(a - b) > threshold * (np.abs(a) + np.abs(b))
+    return np.all(np.abs(a - b) > threshold * (np.abs(a) + np.abs(b)))
 
 
 def read_in_chunks(data_path: str, chunk_size: int, offset: int, full_sequences: bool):
