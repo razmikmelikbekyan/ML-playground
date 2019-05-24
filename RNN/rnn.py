@@ -362,7 +362,7 @@ class RNN:
 
 if __name__ == '__main__':
     # should be simple plain text file
-    file = open('data/input.txt', 'r')
+    file = open('data/datasets/simple.txt', 'r')
     data = file.read()
     file.close()
 
@@ -409,7 +409,8 @@ if __name__ == '__main__':
     print('dWhy check is passed')
 
     rnn.reset_current_state()
-    rnn.gradient_check(np.array([0, 1, 2, 3, 4]), np.array([1, 2, 3, 4, 5]))
+    rnn.gradient_check(np.array([0, 1, 2, 3, 4]), np.array([1, 2, 3, 4, 5]),
+                       epsilon=1e-5, threshold=1e-3)
 
     # http://willwolf.io/2016/10/18/recurrent-neural-network-gradients-and-lessons-learned-therein/
     # https://github.com/dennybritz/rnn-tutorial-rnnlm
