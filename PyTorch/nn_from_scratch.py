@@ -73,7 +73,7 @@ class NeuralNetwork:
                 param[ix] = original_value - epsilon
                 loss_minus = self.loss(x, label)
 
-                # numeric_gradient = (f(x + delta) - f(x - delta)) / (2 * delta)
+                # numeric_gradient = (f(x + epsilon) - f(x - epsilon)) / (2 * epsilon)
                 d_param[ix] = ((loss_plus - loss_minus) / (2 * epsilon)).item()
 
                 # resetting parameter to original value
