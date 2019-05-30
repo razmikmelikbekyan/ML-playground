@@ -70,13 +70,15 @@ class NeuralNetwork:
         return dw_1, dw_2
 
     def sgd_step(self, x: torch.Tensor, label: torch.Tensor, lr: float):
+        """Performs simple stochastic gradient descent step."""
         dw_1, dw_2 = self.backward(x, label)
         self.w_1 -= lr * dw_1
         self.w_2 -= lr * dw_2
 
     def numerical_gradients(self, x: torch.Tensor, label: torch.Tensor, epsilon: float):
+        """Numerically calculates gradients."""
         d_params = (
-            torch.zeros_like(self.w_1, dtype=self.dtype),
+            torch.zeros_like(self.w_1, dxtype=self.dtype),
             torch.zeros_like(self.w_2, dtype=self.dtype)
         )
         params = (self.w_1, self.w_2)

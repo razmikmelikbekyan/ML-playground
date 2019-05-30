@@ -6,13 +6,15 @@ import torch
 from sklearn.metrics import classification_report, accuracy_score
 
 from dataset import get_mnist_data
-from nn_autograd import NeuralNetwork as AutoGradNN
-from nn_manualgrad import NeuralNetwork as ManualGradNN
+from nn_auto_grad import NeuralNetwork as AutoGradNN
+from nn_manual_grad import NeuralNetwork as ManualGradNN
+from nn_nn_module import NeuralNetwork as NNModuleNN
 from utils import plot_loss
 
 nns = {
     '1': ManualGradNN,
     '2': AutoGradNN,
+    '3': NNModuleNN,
 }
 
 parser = ArgumentParser()
@@ -23,7 +25,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     nn = nns[args.nn_type](784, 20, 10, torch.float32)
-    epochs = 500
+    epochs = 100
 
     # Training
     train_loss, test_loss = [], []
@@ -46,7 +48,8 @@ if __name__ == '__main__':
 
     # Testing
     test_predictions_labels = [
-        (np.argmax(torch.exp(nn.forward(x)), axis=1), np.argmax(l, axis=1)) for x, l in test_data
+        (np.argmax(torch.exp(nn.forward(x).detach()), axis=1), np.argmax(l, axis=1))
+        for x, l in test_data
     ]
     predictions, labels = zip(*test_predictions_labels)
     predictions, labels = torch.cat(predictions), torch.cat(labels)
