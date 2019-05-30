@@ -1,19 +1,16 @@
 import torch
 import torch.nn.functional as F
 
-dtype = torch.float64
-device = torch.device("cpu")
-
 
 class NeuralNetwork:
 
-    def __init__(self, input_size: int, hidden_size: int, output_size: int):
-        self.w_1 = torch.randn(hidden_size, input_size,
-                               dtype=dtype, device=device, requires_grad=True)
-        self.w_2 = torch.randn(output_size, hidden_size,
-                               dtype=dtype, device=device, requires_grad=True)
+    def __init__(self, input_size: int, hidden_size: int, output_size: int, dtype: torch.dtype):
+        self.w_1 = torch.randn(hidden_size, input_size, dtype=dtype, requires_grad=True)
+        self.w_2 = torch.randn(output_size, hidden_size, dtype=dtype, requires_grad=True)
 
     def forward(self, x: torch.Tensor):
+
+
         z_1 = torch.sigmoid(torch.matmul(self.w_1, x))
         z_2 = F.log_softmax(torch.matmul(self.w_2, z_1), dim=0)
         return z_2

@@ -1,43 +1,72 @@
 import numpy as np
 import torch
 import torch.nn.functional as F
-from utils import check_relative_difference
 
-dtype = torch.float64
-device = torch.device("cpu")
+
+from dataset import get_mnist_data
+from utils import check_relative_difference
 
 
 class NeuralNetwork:
+    """
+    Simple Neural Network with one hidden layer for classification.
+    The backpropagation is implemented manually.
 
-    def __init__(self, input_size: int, hidden_size: int, output_size: int):
-        self.w_1 = torch.randn(hidden_size, input_size, dtype=dtype, device=device) * 0.01
-        self.w_2 = torch.randn(output_size, hidden_size, dtype=dtype, device=device) * 0.01
+    It uses sigmoid as an activation function for hidden layer and log_softmax for output layer.
+    Loss function is a cross entropy loss.
+    """
 
+    def __init__(self, input_size: int, hidden_size: int, output_size: int, dtype: torch.dtype):
+
+        self.w_1 = torch.randn(hidden_size, input_size, dtype=dtype) * 0.01
+        self.w_2 = torch.randn(output_size, hidden_size, dtype=dtype) * 0.01
+
+        self.dtype = dtype
         self.cache = {}
 
     def forward(self, x: torch.Tensor):
-        h_1 = torch.matmul(self.w_1, x)
+        """
+        Forward pass function.
+
+        x shape: (batch_size, input_size)
+        Returns log prediction.
+        """
+
+        h_1 = torch.matmul(x, self.w_1.t())
         z_1 = torch.sigmoid(h_1)
-        h_2 = torch.matmul(self.w_2, z_1)
-        z_2 = F.log_softmax(h_2, dim=0)
+
+        h_2 = torch.matmul(z_1, self.w_2.t())
+        z_2 = F.log_softmax(h_2, dim=1)
 
         self.cache['z_1'] = z_1
         self.cache['z_2'] = z_2
         return z_2
 
-    def loss(self, x: torch.Tensor, label: torch.Tensor):
+    def loss(self, x: torch.Tensor, label: torch.Tensor) -> torch.Tensor:
+        """
+        Cross entropy loss function.
+
+        x shape: (batch_size, input_size)
+        label shape: (batch_size, output_size)
+        """
         log_prediction = self.forward(x)
         return -torch.sum(label * log_prediction)
 
     def backward(self, x: torch.Tensor, label: torch.Tensor):
+        """
+        Performs backpropagation, aka calculates loss gradient w.r.t. network weights.
+
+        x shape: (batch_size, input_size)
+        label shape: (batch_size, output_size)
+        """
         self.forward(x)
 
         z_1, z_2 = self.cache['z_1'], self.cache['z_2']
 
         dh_2 = torch.exp(z_2) - label
-        dw_2 = torch.matmul(dh_2, z_1.t())
-        dh_1 = torch.matmul(self.w_2.t(), dh_2) * (z_1 * (1 - z_1))
-        dw_1 = torch.matmul(dh_1, x.t())
+        dw_2 = torch.matmul(dh_2.t(), z_1)
+        dh_1 = torch.matmul(dh_2, self.w_2) * (z_1 * (1 - z_1))
+        dw_1 = torch.matmul(dh_1.t(), x)
         return dw_1, dw_2
 
     def sgd_step(self, x: torch.Tensor, label: torch.Tensor, lr: float):
@@ -47,8 +76,8 @@ class NeuralNetwork:
 
     def numerical_gradients(self, x: torch.Tensor, label: torch.Tensor, epsilon: float):
         d_params = (
-            torch.zeros_like(self.w_1, dtype=dtype, device=device),
-            torch.zeros_like(self.w_2, dtype=dtype, device=device)
+            torch.zeros_like(self.w_1, dtype=self.dtype),
+            torch.zeros_like(self.w_2, dtype=self.dtype)
         )
         params = (self.w_1, self.w_2)
 
@@ -118,26 +147,44 @@ class NeuralNetwork:
 
 
 if __name__ == "__main__":
+    threshold = 1e-4
+
     print('Testing implementation.')
 
-    model = NeuralNetwork(10, 20, 3)
+    batch_size, input_size, hidden_size, output_size = 64, 784, 20, 10
+    data, _ = get_mnist_data(batch_size=batch_size)
+    x, label = next(data)
 
-    x = torch.arange(10, dtype=dtype).view(10, 1)
-    label = torch.tensor([0, 0, 1.], dtype=dtype).reshape(3, 1)
+    model = NeuralNetwork(input_size, hidden_size, output_size, x.dtype)
 
     log_pred = model.forward(x)
     pred = torch.exp(log_pred)
 
-    assert pred.shape == label.shape == (3, 1)
-    assert bool(abs(sum(pred) - 1.) < 1e-6)
+    assert pred.shape == label.shape == (batch_size, output_size)
+    assert abs(torch.sum(pred[0]).item() - 1.) < threshold
+
+    diff = abs(torch.sum(pred).item() - batch_size)
+    try:
+        assert diff < threshold
+    except AssertionError:
+        print(diff)
 
     loss = model.loss(x, label)
-    assert torch.equal(loss, -log_pred[2, 0])
+    _, indexes = np.where(label > 0.)
+    diff = abs(loss.item() + log_pred[torch.arange(batch_size), indexes].sum().item())
+    try:
+        assert diff < threshold
+    except AssertionError:
+        print(diff)
 
     dw_1, dw_2 = model.backward(x, label)
-    assert dw_1.shape == model.w_1.shape == (20, 10)
-    assert dw_2.shape == model.w_2.shape == (3, 20)
+    assert dw_1.shape == model.w_1.shape == (hidden_size, input_size)
+    assert dw_2.shape == model.w_2.shape == (output_size, hidden_size)
 
     print('\nShapes are correct.')
+    dtype = torch.float64
 
+    x = torch.arange(10, dtype=dtype).view(1, 10)
+    label = torch.tensor([0, 0, 1.], dtype=dtype).reshape(1, 3)
+    model = NeuralNetwork(10, 20, 3, dtype)
     model.gradient_check(x, label, epsilon=1e-3, threshold=1e-4)
