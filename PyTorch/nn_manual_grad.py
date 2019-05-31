@@ -18,8 +18,8 @@ class NeuralNetwork:
 
     def __init__(self, input_size: int, hidden_size: int, output_size: int, dtype: torch.dtype):
 
-        self.w_1 = torch.randn(hidden_size, input_size, dtype=dtype) * 0.01
-        self.w_2 = torch.randn(output_size, hidden_size, dtype=dtype) * 0.01
+        self.w_1 = torch.randn(input_size, hidden_size, dtype=dtype) * 0.01
+        self.w_2 = torch.randn(hidden_size, output_size, dtype=dtype) * 0.01
 
         self.dtype = dtype
         self.cache = {}
@@ -32,10 +32,10 @@ class NeuralNetwork:
         Returns log prediction.
         """
 
-        h_1 = torch.matmul(x, self.w_1.t())
+        h_1 = torch.matmul(x, self.w_1)
         z_1 = torch.sigmoid(h_1)
 
-        h_2 = torch.matmul(z_1, self.w_2.t())
+        h_2 = torch.matmul(z_1, self.w_2)
         z_2 = F.log_softmax(h_2, dim=1)
 
         self.cache['z_1'] = z_1
@@ -64,9 +64,9 @@ class NeuralNetwork:
         z_1, z_2 = self.cache['z_1'], self.cache['z_2']
 
         dh_2 = torch.exp(z_2) - label
-        dw_2 = torch.matmul(dh_2.t(), z_1)
-        dh_1 = torch.matmul(dh_2, self.w_2) * (z_1 * (1 - z_1))
-        dw_1 = torch.matmul(dh_1.t(), x)
+        dw_2 = torch.matmul(z_1.t(), dh_2)
+        dh_1 = torch.matmul(dh_2, self.w_2.t()) * (z_1 * (1 - z_1))
+        dw_1 = torch.matmul(x.t(), dh_1)
         return dw_1, dw_2
 
     def sgd_step(self, x: torch.Tensor, label: torch.Tensor, lr: float):
@@ -78,7 +78,7 @@ class NeuralNetwork:
     def numerical_gradients(self, x: torch.Tensor, label: torch.Tensor, epsilon: float):
         """Numerically calculates gradients."""
         d_params = (
-            torch.zeros_like(self.w_1, dxtype=self.dtype),
+            torch.zeros_like(self.w_1, dtype=self.dtype),
             torch.zeros_like(self.w_2, dtype=self.dtype)
         )
         params = (self.w_1, self.w_2)
@@ -180,8 +180,8 @@ if __name__ == "__main__":
         print(diff)
 
     dw_1, dw_2 = model.backward(x, label)
-    assert dw_1.shape == model.w_1.shape == (hidden_size, input_size)
-    assert dw_2.shape == model.w_2.shape == (output_size, hidden_size)
+    assert dw_1.shape == model.w_1.shape == (input_size, hidden_size)
+    assert dw_2.shape == model.w_2.shape == (hidden_size, output_size)
 
     print('\nShapes are correct.')
     dtype = torch.float64

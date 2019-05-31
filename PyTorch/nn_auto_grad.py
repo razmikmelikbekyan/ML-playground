@@ -12,8 +12,8 @@ class NeuralNetwork:
     """
 
     def __init__(self, input_size: int, hidden_size: int, output_size: int, dtype: torch.dtype):
-        self.w_1 = torch.randn(hidden_size, input_size, dtype=dtype) * 0.01
-        self.w_2 = torch.randn(output_size, hidden_size, dtype=dtype) * 0.01
+        self.w_1 = torch.randn(input_size, hidden_size, dtype=dtype) * 0.01
+        self.w_2 = torch.randn(hidden_size, output_size, dtype=dtype) * 0.01
 
         self.w_1.requires_grad = True
         self.w_2.requires_grad = True
@@ -25,8 +25,8 @@ class NeuralNetwork:
         x shape: (batch_size, input_size)
         Returns log prediction.
         """
-        z_1 = torch.sigmoid(torch.matmul(x, self.w_1.t()))
-        z_2 = F.log_softmax(torch.matmul(z_1, self.w_2.t()), dim=1)
+        z_1 = torch.sigmoid(torch.matmul(x, self.w_1))
+        z_2 = F.log_softmax(torch.matmul(z_1, self.w_2), dim=1)
         return z_2
 
     def loss(self, x: torch.Tensor, label: torch.Tensor):

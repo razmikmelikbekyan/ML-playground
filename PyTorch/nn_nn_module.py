@@ -17,8 +17,8 @@ class NeuralNetwork(nn.Module):
 
     def __init__(self, input_size: int, hidden_size: int, output_size: int, dtype: torch.dtype):
         super().__init__()
-        self.w_1 = nn.Parameter(torch.randn(hidden_size, input_size, dtype=dtype) * 0.01)
-        self.w_2 = nn.Parameter(torch.randn(output_size, hidden_size, dtype=dtype) * 0.01)
+        self.w_1 = nn.Parameter(torch.randn(input_size, hidden_size, dtype=dtype) * 0.01)
+        self.w_2 = nn.Parameter(torch.randn(hidden_size, output_size, dtype=dtype) * 0.01)
 
     def forward(self, x: torch.Tensor):
         """
@@ -27,15 +27,15 @@ class NeuralNetwork(nn.Module):
         x shape: (batch_size, input_size)
         Returns log prediction.
         """
-        z_1 = torch.sigmoid(torch.matmul(x, self.w_1.t()))
-        z_2 = F.log_softmax(torch.matmul(z_1, self.w_2.t()), dim=1)
+        z_1 = torch.sigmoid(torch.matmul(x, self.w_1))
+        z_2 = F.log_softmax(torch.matmul(z_1, self.w_2), dim=1)
         return z_2
 
     def loss(self, x: torch.Tensor, label: torch.Tensor):
         """
         Cross entropy loss function.
 
-        x shape: (batch_size, input_sizeassert bool(abs(sum(pred) - 1.) < 1e-6))
+        x shape: (batch_size, input_size)
         label shape: (batch_size, output_size)
         """
         log_prediction = self.forward(x)
