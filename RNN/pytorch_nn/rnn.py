@@ -1,6 +1,7 @@
 from typing import Tuple, Dict, List
 
 import numpy as np
+import torch
 
 try:
     from .utils import (softmax, sigmoid, tanh, relu, dsigmoid, drelu, dtanh,
@@ -28,7 +29,8 @@ class RNN:
     def __init__(self,
                  vocabulary_size: int,
                  hidden_size: int,
-                 non_linearity: str = 'tanh'):
+                 non_linearity: str = 'tanh',
+                 dtype: torch.dtype = torch.float32):
         """
         :param vocabulary_size: the size of vocabulary, aka the number of unique characters in
                                 vocabulary
@@ -41,29 +43,30 @@ class RNN:
 
         self.vocabulary_size = vocabulary_size
         self.hidden_size = hidden_size
+        self.dtype = dtype
 
         # activation function and its dervivate w.r.t. its direct input
         self.f, self.f_prime = self.activations[non_linearity]
 
         # randomly initializing weights
 
-        self.w_hx = np.random.uniform(
-            -np.sqrt(1. / vocabulary_size), np.sqrt(1. / vocabulary_size),
-            (hidden_size, vocabulary_size)
+        self.w_hx = torch.FloatTensor(hidden_size, vocabulary_size).uniform_(
+            -np.sqrt(1. / vocabulary_size), np.sqrt(1. / vocabulary_size)
         )
+        self.w_hx = self.w_hx.type(self.dtype)
 
-        self.w_hh = np.random.uniform(
-            -np.sqrt(1. / hidden_size), np.sqrt(1. / hidden_size),
-            (hidden_size, hidden_size)
+        self.w_hh = torch.FloatTensor(hidden_size, hidden_size).uniform_(
+            -np.sqrt(1. / hidden_size), np.sqrt(1. / hidden_size)
         )
+        self.w_hh = self.w_hh.type(self.dtype)
 
-        self.w_hy = np.random.uniform(
-            -np.sqrt(1. / hidden_size), np.sqrt(1. / hidden_size),
-            (vocabulary_size, hidden_size)
+        self.w_hy = torch.FloatTensor(vocabulary_size, hidden_size).uniform_(
+            -np.sqrt(1. / hidden_size), np.sqrt(1. / hidden_size)
         )
+        self.w_hy = self.w_hy.type(self.dtype)
 
         # setting the current state
-        self.current_state = np.zeros((self.hidden_size, 1))
+        self.current_state = torch.zeros((self.hidden_size, 1), dtype=self.dtype)
 
     def reset_current_state(self):
         """Resets current state to zeros."""
@@ -71,7 +74,7 @@ class RNN:
 
     # ### Forward pass ###
 
-    def forward(self, x: np.ndarray, update_state: bool) -> Tuple[Dict, Dict]:
+    def forward(self, x: torch.Tensor, update_state: bool) -> Tuple[Dict, Dict]:
         """
         The basic forward pass:
 
@@ -89,8 +92,9 @@ class RNN:
                  predicted_probabilities - array of predicted probabilities for each character in
                                            vocabulary, size = (sequence length, vocabulary size)
         """
+
         # one hot encoding of input
-        inputs_matrix = one_hot_encode(x, self.vocabulary_size)
+        inputs_matrix = one_hot_encode(x, self.vocabulary_size, self.dtype)
 
         ps, hs = {}, {}  # predicted probabilities and hidden states
         hs[-1] = self.current_state  # setting the current state
@@ -99,11 +103,11 @@ class RNN:
             h_t_1 = hs[t - 1]  # dim : (self.hidden_size, 1)
 
             # state at t
-            z_t = np.dot(self.w_hh, h_t_1) + np.dot(self.w_hx, inputs_matrix[t])
+            z_t = torch.matmul(self.w_hh, h_t_1) + torch.matmul(self.w_hx, inputs_matrix[t])
             h_t = self.f(z_t)  # dim : (self.hidden_size, 1)
 
             # prediction from hidden state at t
-            y_t = np.dot(self.w_hy, h_t)  # unnormalized log probabilities for next chars
+            y_t = torch.matmul(self.w_hy, h_t)  # unnormalized log probabilities for next chars
             p_t = softmax(y_t)  # probabilities for next chars,  dim : (self.vocabulary_size, 1)
 
             # updating hidden state and and predicted_probabilities keepers
@@ -123,7 +127,7 @@ class RNN:
 
     # ### Backward pass ###
 
-    def backward(self, x: np.ndarray, labels: np.ndarray, hs: Dict, ps: Dict):
+    def backward(self, x: torch.Tensor, labels: torch.Tensor, hs: Dict, ps: Dict):
         """
         Makes backward pass through the network.
         Returns the gradients of loss w.r.t. network parameters -  w_hx, w_hh, w_hy.
@@ -137,22 +141,22 @@ class RNN:
                    (the second output of the self.forward method)
         :return: gradients of w_hx, w_hh, w_hy
         """
-        inputs_matrix = one_hot_encode(x, self.vocabulary_size)
-        labels_matrix = one_hot_encode(labels, self.vocabulary_size)
+        inputs_matrix = one_hot_encode(x, self.vocabulary_size, self.dtype)
+        labels_matrix = one_hot_encode(labels, self.vocabulary_size, self.dtype)
 
-        dw_hx = np.zeros_like(self.w_hx)
-        dw_hh = np.zeros_like(self.w_hh)
-        dw_hy = np.zeros_like(self.w_hy)
+        dw_hx = torch.zeros_like(self.w_hx, dtype=self.dtype)
+        dw_hh = torch.zeros_like(self.w_hh, dtype=self.dtype)
+        dw_hy = torch.zeros_like(self.w_hy, dtype=self.dtype)
 
         for t in reversed(range(len(x))):
             # dl / dy = p - label
             dy_t = ps[t] - labels_matrix[t]
 
             # dl / dw_hy = (dl / dy) * (dy / dw_hy)
-            dw_hy += np.dot(dy_t, hs[t].T)
+            dw_hy += torch.matmul(dy_t, hs[t].t())
 
             # dl / dh = (dl / dy) * (dy / dh) = (p - label) * w_hy
-            dh_t = np.dot(self.w_hy.T, dy_t)
+            dh_t = torch.matmul(self.w_hy.t(), dy_t)
 
             # dl / dz_{k} = (dl / dh_{k}) * (dh_{k} / dz_{k}) = dh_{t} * (dh_{k} / dz_{k})
             dz_k = dh_t * self.f_prime(hs[t])
@@ -161,23 +165,23 @@ class RNN:
             # dl / dw_hx = ∑ (dl / dz_{k}) * (dz_{k} / dw_hx) for all k from 1 to t
             for k in reversed(range(t + 1)):
                 # (dl / dz_{k}) (dz_{k} / dw_hh) = dz_k * h_{k-1}
-                dw_hh += np.dot(dz_k, hs[k - 1].T)
+                dw_hh += torch.matmul(dz_k, hs[k - 1].t())
 
                 # (dl / dz_{k}) (dz_{k} / dw_h) = dz_k * x_{k}
-                dw_hx += np.dot(dz_k, inputs_matrix[k].T)
+                dw_hx += torch.matmul(dz_k, inputs_matrix[k].t())
 
                 # updating dz_k using all previous derivatives (from t to t - k)
                 # dl / dz_(k-1) = (dl / dz_{k})(dz_{k} / dh_{k-1}) * (dh_{k-1) / dz_{k-1})
-                dz_k = np.dot(self.w_hh.T, dz_k) * self.f_prime(hs[k - 1])
+                dz_k = torch.matmul(self.w_hh.t(), dz_k) * self.f_prime(hs[k - 1])
 
-        # clip to mitigate exploding gradients
-        for d_param in (dw_hx, dw_hh, dw_hy):
-            np.clip(d_param, -5, 5, out=d_param)
+        # # clip to mitigate exploding gradients
+        # for d_param in (dw_hx, dw_hh, dw_hy):
+        #     torch.clip(d_param, -5, 5, out=d_param)
 
         return dw_hx, dw_hh, dw_hy
 
-    def calculate_numeric_gradients(self, x: np.ndarray,
-                                    labels: np.ndarray,
+    def calculate_numeric_gradients(self, x: torch.Tensor,
+                                    labels: torch.Tensor,
                                     epsilon: float) -> Tuple:
         """
         Calculates numeric gradients w.r.t. model all parameters.
@@ -187,9 +191,9 @@ class RNN:
         :return: numeric gradients for dw_hx, dw_hh, dw_hy
         """
         self.reset_current_state()
-        dw_hx_numeric = np.zeros_like(self.w_hx)
-        dw_hh_numeric = np.zeros_like(self.w_hh)
-        dw_hy_numeric = np.zeros_like(self.w_hy)
+        dw_hx_numeric = torch.zeros_like(self.w_hx, dtype=self.dtype)
+        dw_hh_numeric = torch.zeros_like(self.w_hh, dtype=self.dtype)
+        dw_hy_numeric = torch.zeros_like(self.w_hy, dtype=self.dtype)
 
         d_params_numeric = (dw_hx_numeric, dw_hh_numeric, dw_hy_numeric)
         params = (self.w_hx, self.w_hh, self.w_hy)
@@ -226,8 +230,8 @@ class RNN:
         return d_params_numeric
 
     def gradient_check(self,
-                       x: np.ndarray,
-                       labels: np.ndarray,
+                       x: torch.Tensor,
+                       labels: torch.Tensor,
                        epsilon: float = 1e-3,
                        threshold: float = 1e-6):
         """
@@ -263,7 +267,7 @@ class RNN:
 
     # ### Gradient descent ###
 
-    def sgd_step(self, x: np.ndarray, labels: np.ndarray, lr: float):
+    def sgd_step(self, x: torch.Tensor, labels: torch.Tensor, lr: float):
         """
         Performs gradient descent step for model parameters: w_hx, w_hh, w_hy.
 
@@ -333,12 +337,12 @@ class RNN:
 
         # forward pass
         for t in range(len(inputs)):
-            xs[t] = np.zeros((vocab_size, 1))  # encode in 1-of-k representation
+            xs[t] = torch.zeros((vocab_size, 1), dtype=self.dtype)
             xs[t][inputs[t]] = 1
-            hs[t] = np.tanh(
-                np.dot(self.w_hx, xs[t]) + np.dot(self.w_hh, hs[t - 1]))  # hidden state
-            ys[t] = np.dot(self.w_hy, hs[t])  # unnormalized log probabilities for next chars
-            ps[t] = np.exp(ys[t]) / np.sum(np.exp(ys[t]))  # probabilities for next chars
+            hs[t] = torch.tanh(
+                torch.matmul(self.w_hx, xs[t]) + torch.matmul(self.w_hh, hs[t - 1]))  # hidden state
+            ys[t] = torch.matmul(self.w_hy, hs[t])  # unnormalized log probabilities for next chars
+            ps[t] = torch.exp(ys[t]) / torch.sum(torch.exp(ys[t]))  # probabilities for next chars
             loss += -np.log(ps[t][targets[t], 0])  # softmax (cross-entropy loss)
 
         # backward pass: compute gradients going backwards
@@ -366,6 +370,8 @@ class RNN:
 
 
 if __name__ == '__main__':
+    dtype = torch.float32
+
     # should be simple plain text file
     file = open('data/datasets/simple.txt', 'r')
     data = file.read()
@@ -379,13 +385,16 @@ if __name__ == '__main__':
     ix_to_char = {i: ch for i, ch in enumerate(chars)}
 
     n = 25
-    inputs = np.array([char_to_ix[x] for x in data[:n]])
-    labels = np.array([char_to_ix[x] for x in data[1:n + 1]])
+    inputs = torch.tensor([char_to_ix[x] for x in data[:n]], dtype=torch.long)
+    labels = torch.tensor([char_to_ix[x] for x in data[1:n + 1]], dtype=torch.long)
 
-    rnn = RNN(vocab_size, 10)
+    rnn = RNN(vocab_size, 10, dtype=dtype)
 
     # current implementation
     hs, ps = rnn.forward(inputs, False)
+
+    assert all(abs(torch.sum(v).item() - 1) < 1e-6 for v in ps.values())
+
     l_1 = rnn.calculate_loss(inputs, labels, False)
     dw_hx_1, dw_hh_1, dw_hy_1 = rnn.backward(inputs, labels, hs, ps)
 

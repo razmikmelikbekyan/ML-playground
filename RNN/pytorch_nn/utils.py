@@ -2,7 +2,7 @@ import torch
 import torch.nn.functional as F
 
 def softmax(x: torch.Tensor) -> torch.Tensor:
-    return F.softmax(x)
+    return F.softmax(x, dim=0)
 
 
 def sigmoid(x: torch.Tensor) -> torch.Tensor:
@@ -14,7 +14,7 @@ def relu(x: torch.Tensor) -> torch.Tensor:
 
 
 def tanh(x: torch.Tensor) -> torch.Tensor:
-    return F.tanh(x)
+    return torch.tanh(x)
 
 
 def dsigmoid(y: torch.Tensor) -> torch.Tensor:
@@ -37,7 +37,7 @@ def dtanh(y: torch.Tensor) -> torch.Tensor:
     return 1 - y ** 2
 
 
-def one_hot_encode(x: torch.Tensor, size: int) -> torch.Tensor:
+def one_hot_encode(x: torch.Tensor, size: int, dtype: torch.dtype) -> torch.Tensor:
     """
     Given the x array of inputs or labels, where each item is the index of character. Performs
     one hot encoding, aka returns the matrix with dimensions (len(x), size). Each row of the matrix
@@ -51,8 +51,8 @@ def one_hot_encode(x: torch.Tensor, size: int) -> torch.Tensor:
     # for example, if size = 15, then the each row should have the
     # size - (15, 1), (without additional 1, it will have size - (15, )
     one_hot_encoded = torch.zeros((n_rows, size, 1))
-    one_hot_encoded[(torch.arange(n_rows), x)] = 1
-    return one_hot_encoded
+    one_hot_encoded[(torch.arange(n_rows), x)] = 1.
+    return one_hot_encoded.type(dtype)
 
 
 def check_relative_difference(a: torch.Tensor, b: torch.Tensor, threshold: float) -> bool:
