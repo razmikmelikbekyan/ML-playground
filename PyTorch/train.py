@@ -1,7 +1,7 @@
 from argparse import ArgumentParser
 from itertools import tee
 
-import numpy as np
+import numpy_nn as np
 import torch
 from sklearn.metrics import classification_report, accuracy_score
 
@@ -9,7 +9,7 @@ from dataset import get_mnist_data
 from nn_auto_grad import NeuralNetwork as AutoGradNN
 from nn_manual_grad import NeuralNetwork as ManualGradNN
 from nn_nn_module import NeuralNetwork as NNModuleNN
-from utils import plot_loss
+from numpy_nn.utils import plot_loss
 
 nns = {
     '1': ManualGradNN,

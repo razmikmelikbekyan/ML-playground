@@ -8,8 +8,8 @@ def get_mnist_data(batch_size: int = 64) -> Tuple[Generator, Generator]:
     """
     Downloads MNIST data set. Returns iterators of train and test data sets with given batch size.
 
-    The size of each batch of images will be the tensor with shape: (batch_size, 1, 28, 28) .
-    The size of each batch of labels will be the tensor with shape: (batch_size, ) .
+    The size of each batch of images will be the tensor with shape: (batch_size, 784) .
+    The size of each batch of labels will be the tensor with shape: (batch_size, 10) .
 
     """
     # Define a transform to normalize the data

@@ -1,10 +1,10 @@
-import numpy as np
+import numpy_nn as np
 import torch
 import torch.nn.functional as F
 
 
 from dataset import get_mnist_data
-from utils import check_relative_difference
+from numpy_nn.utils import check_relative_difference
 
 
 class NeuralNetwork:

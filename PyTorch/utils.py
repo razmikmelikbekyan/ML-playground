@@ -1,7 +1,7 @@
 from typing import List
 
 import matplotlib.pyplot as plt
-import numpy as np
+import numpy_nn as np
 import torch
 
 

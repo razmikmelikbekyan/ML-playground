@@ -2,8 +2,22 @@ import argparse
 import json
 from typing import Dict, Tuple, List
 
-from rnn import RNN
-from utils import get_support_data, get_inputs_targets, plot_loss
+import matplotlib.pyplot as plt
+
+from data_utils import get_support_data, get_inputs_targets
+from numpy_nn.rnn import RNN
+
+
+def plot_loss(losses: List):
+    """PLots losses."""
+    _, epoch, loss = zip(*losses)
+    plt.figure(figsize=(15, 15))
+    plt.title('Loss over epochs')
+    plt.plot(epoch, loss)
+    plt.xlabel('Epoch')
+    plt.ylabel('Loss')
+    plt.tight_layout()
+    plt.show()
 
 
 def train_with_sgd(params: Dict,
