@@ -1,5 +1,8 @@
 from typing import Tuple, Dict
 
+import numpy as np
+import torch
+
 
 def read_in_chunks(data_path: str, chunk_size: int, offset: int, full_sequences: bool):
     """
@@ -57,12 +60,19 @@ def get_support_data(data_path: str) -> Tuple[int, Dict[str, int], Dict[int, str
 def get_inputs_targets(data_path: str,
                        sequence_length: int,
                        char_to_ix: Dict[str, int],
-                       full_sequences: bool):
+                       full_sequences: bool,
+                       package: str):
     """Generates inputs and targets from given data and sequence length."""
+    assert package in ('numpy', 'pytorch')
     inputs_gen = read_in_chunks(data_path, sequence_length, 0, full_sequences)
     targets_gen = read_in_chunks(data_path, sequence_length, 1, full_sequences)
     for x, y in zip(inputs_gen, targets_gen):
         # handling the last item
         if len(y) < sequence_length:
             x = x[:-1]
-        yield [char_to_ix[ch] for ch in x.lower()], [char_to_ix[ch] for ch in y.lower()]
+
+        x, y = [char_to_ix[ch] for ch in x.lower()], [char_to_ix[ch] for ch in y.lower()]
+        if package == 'numpy':
+            yield np.array(x), np.array(y)
+        else:
+            yield torch.tensor(x, dtype=torch.long), torch.tensor(y, dtype=torch.long)

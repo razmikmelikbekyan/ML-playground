@@ -5,7 +5,8 @@ from typing import Dict, Tuple, List
 import matplotlib.pyplot as plt
 
 from data_utils import get_support_data, get_inputs_targets
-from numpy_nn.rnn import RNN
+from numpy_nn.rnn import RNN as NumpyRNN
+from pytorch_nn.rnn import RNN as PytorchRNN
 
 
 def plot_loss(losses: List):
@@ -25,17 +26,19 @@ def train_with_sgd(params: Dict,
                    lr: float = 0.005,
                    full_sequences: bool = False,
                    epochs: int = 100,
-                   evaluate_loss_after: int = 5) -> Tuple[RNN, List]:
+                   evaluate_loss_after: int = 5,
+                   package: str = 'numpy') -> Tuple:
     """
     Initializes RNN model with given params, rains given model using given data set.
+
     :param params: the RNN model params dict,
                          {'hidden_size' : int, 'non_linearity': str, 'sequence_length': int}
-
     :param data_path: the data set path, it should be a txt file
     :param lr: initial learning rate for SGD
     :param full_sequences: if True generates full sequences from data
     :param epochs: number of times to iterate through the complete data set
     :param evaluate_loss_after: evaluate the loss after this many epochs
+    :param package: which package implementation to use, numpy or pytorch
     :return: trained model and list of losses
     """
 
@@ -45,7 +48,8 @@ def train_with_sgd(params: Dict,
                                                    params['non_linearity'],
                                                    params['sequence_length'])
 
-    model = RNN(vocabulary_size, hidden_size, non_linearity=non_linearity)
+    model_class = NumpyRNN if package == 'numpy' else PytorchRNN
+    model = model_class(vocabulary_size, hidden_size, non_linearity=non_linearity)
 
     # keep track of the losses so we can plot them later
     losses = []
@@ -56,7 +60,7 @@ def train_with_sgd(params: Dict,
             epoch_loss = sum([
                 model.calculate_loss(x, y, True)
                 for x, y in get_inputs_targets(data_path, sequence_length,
-                                               char_to_ix, full_sequences)
+                                               char_to_ix, full_sequences, package)
             ])
             losses.append((num_examples_seen, epoch, epoch_loss))
 
@@ -70,7 +74,8 @@ def train_with_sgd(params: Dict,
 
         # performing training of model for current epoch
         model.reset_current_state()
-        for x, y in get_inputs_targets(data_path, sequence_length, char_to_ix, full_sequences):
+        for x, y in get_inputs_targets(data_path, sequence_length,
+                                       char_to_ix, full_sequences, package):
             model.sgd_step(x, y, lr)
             num_examples_seen += 1
 
@@ -83,6 +88,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--params', type=str, required=True, help='The model params json path.')
 parser.add_argument('--data', type=str, required=True, help='The data set path.')
 parser.add_argument('--lr', type=float, default=0.05, help='The learning rate for SGD.')
+parser.add_argument('--package', type=str, choices=['numpy', 'pytorch'], default='numpy')
 parser.add_argument('--full-sequences', action='store_true',
                     help='If True generates full sequences from data.')
 parser.add_argument('--epochs', type=int, default=100,
@@ -101,7 +107,8 @@ def main(args):
                                     lr=args.lr,
                                     full_sequences=args.full_sequences,
                                     epochs=args.epochs,
-                                    evaluate_loss_after=args.loss_evaluation_epochs)
+                                    evaluate_loss_after=args.loss_evaluation_epochs,
+                                    package=args.package)
     model.save(args.saving_path)
 
     plot_loss(losses)
