@@ -56,21 +56,25 @@ class RNN:
         )
         self.w_hx = self.w_hx.type(self.dtype)
         self.w_hx.requires_grad = True
+        self.w_hx = torch.randn(hidden_size, vocabulary_size, requires_grad=True, dtype=dtype)
 
         self.w_hh = torch.FloatTensor(hidden_size, hidden_size).uniform_(
             -np.sqrt(1. / hidden_size), np.sqrt(1. / hidden_size)
         )
         self.w_hh = self.w_hh.type(self.dtype)
         self.w_hh.requires_grad = True
+        self.w_hh = torch.randn(hidden_size, hidden_size, requires_grad=True, dtype=dtype)
+
 
         self.w_hy = torch.FloatTensor(vocabulary_size, hidden_size).uniform_(
             -np.sqrt(1. / hidden_size), np.sqrt(1. / hidden_size)
         )
         self.w_hy = self.w_hy.type(self.dtype)
         self.w_hy.requires_grad = True
+        self.w_hy = torch.randn(vocabulary_size, hidden_size, requires_grad=True, dtype=dtype)
 
         # setting the current state
-        self.current_state = torch.zeros((self.hidden_size, 1), dtype=self.dtype)
+        self.current_state = torch.zeros(self.hidden_size, dtype=self.dtype)
 
     def reset_current_state(self):
         """Resets current state to zeros."""
@@ -105,20 +109,20 @@ class RNN:
         hs = torch.zeros(n, self.hidden_size, dtype=self.dtype)
 
         for t in range(len(x)):
-            # state at t - 1, # dim : (self.hidden_size, 1)
+            # state at t - 1, dim : (self.hidden_size, 1)
             if t == 0:
                 h_t_1 = self.current_state
             else:
                 h_t_1 = hs[t - 1]
 
-                # state at t, # dim : (self.hidden_size, 1)
+            # state at t, dim : (self.hidden_size, 1)
             h_t = self.f(
                 torch.matmul(self.w_hh, h_t_1) + torch.matmul(self.w_hx, inputs_matrix[t])
             )
 
             # prediction from hidden state at t,
             # log probabilities for next chars,  dim : (self.vocabulary_size, 1)
-            p_t = F.log_softmax(torch.matmul(self.w_hy, h_t))
+            p_t = F.log_softmax(torch.matmul(self.w_hy, h_t), dim=0)
 
             # updating hidden state and and predicted_probabilities keepers
             hs[t], log_ps[t] = h_t, p_t
@@ -178,7 +182,7 @@ class RNN:
                 # (dl / dz_{k}) (dz_{k} / dw_h) = dz_k * x_{k}
                 dw_hx += torch.matmul(dz_k, inputs_matrix[k].t())
 
-                # updating dz_k using all previous derivatives (from t to t - k)
+                # updating dz_k using all previous dealues()rivatives (from t to t - k)
                 # dl / dz_(k-1) = (dl / dz_{k})(dz_{k} / dh_{k-1}) * (dh_{k-1) / dz_{k-1})
                 dz_k = torch.matmul(self.w_hh.t(), dz_k) * self.f_prime(hs[k - 1])
 
@@ -315,12 +319,14 @@ if __name__ == '__main__':
     rnn = RNN(vocab_size, 10, dtype=dtype)
 
     # current implementation
-    hs, ps = rnn.forward(inputs, False)
+    hs, log_ps = rnn.forward(inputs, False)
 
-    assert all(abs(torch.sum(v).item() - 1) < 1e-6 for v in ps.values())
+    assert all(abs(torch.sum(torch.exp(x)).item() - 1) < 1e-6 for x in log_ps)
 
     l_1 = rnn.calculate_loss(inputs, labels, False)
-    dw_hx_1, dw_hh_1, dw_hy_1 = rnn.backward(inputs, labels, hs, ps)
+
+    print(l_1.backward())
+    dw_hx_1, dw_hh_1, dw_hy_1 = rnn.backward(inputs, labels, hs, log_ps)
 
     # Karpathy implementation
     l_2, dw_hx_2, dw_hh_2, dw_hy_2, _ = rnn.lossFun(inputs, labels, torch.zeros((10, 1)))

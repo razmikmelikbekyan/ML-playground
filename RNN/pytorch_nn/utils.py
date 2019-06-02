@@ -48,9 +48,8 @@ def one_hot_encode(x: torch.Tensor, size: int, dtype: torch.dtype) -> torch.Tens
 
     # here we manually add 1 at the end, in order to have each row of the matrix as a
     # matrix, instead of vector, for properly calculating dot products
-    # for example, if size = 15, then the each row should have the
-    # size - (15, 1), (without additional 1, it will have size - (15, )
-    one_hot_encoded = torch.zeros((n_rows, size, 1))
+    # for example, if size = 15, then the each row should have the size - (15, )
+    one_hot_encoded = torch.zeros((n_rows, size))
     one_hot_encoded[(torch.arange(n_rows), x)] = 1.
     return one_hot_encoded.type(dtype)
 
