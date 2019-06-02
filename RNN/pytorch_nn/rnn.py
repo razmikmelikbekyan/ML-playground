@@ -2,6 +2,7 @@ from typing import Tuple, Dict, List
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 try:
     from .utils import (softmax, sigmoid, tanh, relu, dsigmoid, drelu, dtanh,
@@ -21,9 +22,9 @@ class RNN:
     """
 
     activations = {
-        'tanh': (tanh, dtanh),
-        'sigmoid': (sigmoid, dsigmoid),
-        'relu': (relu, drelu)
+        'tanh': torch.tanh,
+        'sigmoid': torch.sigmoid,
+        'relu': F.relu
     }
 
     def __init__(self,
@@ -46,7 +47,7 @@ class RNN:
         self.dtype = dtype
 
         # activation function and its dervivate w.r.t. its direct input
-        self.f, self.f_prime = self.activations[non_linearity]
+        self.f = self.activations[non_linearity]
 
         # randomly initializing weights
 
@@ -54,16 +55,19 @@ class RNN:
             -np.sqrt(1. / vocabulary_size), np.sqrt(1. / vocabulary_size)
         )
         self.w_hx = self.w_hx.type(self.dtype)
+        self.w_hx.requires_grad = True
 
         self.w_hh = torch.FloatTensor(hidden_size, hidden_size).uniform_(
             -np.sqrt(1. / hidden_size), np.sqrt(1. / hidden_size)
         )
         self.w_hh = self.w_hh.type(self.dtype)
+        self.w_hh.requires_grad = True
 
         self.w_hy = torch.FloatTensor(vocabulary_size, hidden_size).uniform_(
             -np.sqrt(1. / hidden_size), np.sqrt(1. / hidden_size)
         )
         self.w_hy = self.w_hy.type(self.dtype)
+        self.w_hy.requires_grad = True
 
         # setting the current state
         self.current_state = torch.zeros((self.hidden_size, 1), dtype=self.dtype)
@@ -83,7 +87,7 @@ class RNN:
         y_{t} = w_hy * h_{t}
         p_{t} = softmax(y_{t})
 
-        Makes forward pass through network.
+        Makes forward pass through network. self.w_hx.requires_grad()
         :param x: the array of integers, where each item is the index of character, the size of
                   array will be the sequence length
         :param update_state: bool, if True updates current state with last state
@@ -92,38 +96,42 @@ class RNN:
                  predicted_probabilities - array of predicted probabilities for each character in
                                            vocabulary, size = (sequence length, vocabulary size)
         """
+        n = len(x)
 
         # one hot encoding of input
         inputs_matrix = one_hot_encode(x, self.vocabulary_size, self.dtype)
 
-        ps, hs = {}, {}  # predicted probabilities and hidden states
-        hs[-1] = self.current_state  # setting the current state
+        log_ps = torch.zeros(n, self.vocabulary_size, dtype=self.dtype)
+        hs = torch.zeros(n, self.hidden_size, dtype=self.dtype)
+
         for t in range(len(x)):
-            # state at t - 1
-            h_t_1 = hs[t - 1]  # dim : (self.hidden_size, 1)
+            # state at t - 1, # dim : (self.hidden_size, 1)
+            if t == 0:
+                h_t_1 = self.current_state
+            else:
+                h_t_1 = hs[t - 1]
 
-            # state at t
-            z_t = torch.matmul(self.w_hh, h_t_1) + torch.matmul(self.w_hx, inputs_matrix[t])
-            h_t = self.f(z_t)  # dim : (self.hidden_size, 1)
+                # state at t, # dim : (self.hidden_size, 1)
+            h_t = self.f(
+                torch.matmul(self.w_hh, h_t_1) + torch.matmul(self.w_hx, inputs_matrix[t])
+            )
 
-            # prediction from hidden state at t
-            y_t = torch.matmul(self.w_hy, h_t)  # unnormalized log probabilities for next chars
-            p_t = softmax(y_t)  # probabilities for next chars,  dim : (self.vocabulary_size, 1)
+            # prediction from hidden state at t,
+            # log probabilities for next chars,  dim : (self.vocabulary_size, 1)
+            p_t = F.log_softmax(torch.matmul(self.w_hy, h_t))
 
             # updating hidden state and and predicted_probabilities keepers
-            hs[t], ps[t] = h_t, p_t
+            hs[t], log_ps[t] = h_t, p_t
 
-        if update_state:
-            self.current_state = hs[len(x) - 1]  # updating the current state
-        return hs, ps
+        return hs, log_ps
 
     def calculate_loss(self, x: np.ndarray, labels: np.ndarray, update_state: bool) -> float:
         """
         Calculates cross entropy loss using target characters indexes and network predictions for
         all characters: loss = ∑ -label_{t} * log(predicted_probability_{t})
         """
-        _, ps = self.forward(x, update_state)
-        return -sum(np.log(ps[i][labels[i], 0]) for i in range(len(labels)))
+        _, log_ps = self.forward(x, update_state)
+        return -torch.sum(log_ps[(torch.arange(len(labels)), labels)])
 
     # ### Backward pass ###
 
