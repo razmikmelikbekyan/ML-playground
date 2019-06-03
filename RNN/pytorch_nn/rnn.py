@@ -65,7 +65,6 @@ class RNN:
         self.w_hh.requires_grad = True
         self.w_hh = torch.randn(hidden_size, hidden_size, requires_grad=True, dtype=dtype)
 
-
         self.w_hy = torch.FloatTensor(vocabulary_size, hidden_size).uniform_(
             -np.sqrt(1. / hidden_size), np.sqrt(1. / hidden_size)
         )
@@ -110,10 +109,7 @@ class RNN:
 
         for t in range(len(x)):
             # state at t - 1, dim : (self.hidden_size, 1)
-            if t == 0:
-                h_t_1 = self.current_state
-            else:
-                h_t_1 = hs[t - 1]
+            h_t_1 = self.current_state.clone() if t == 0 else hs[t - 1].clone()
 
             # state at t, dim : (self.hidden_size, 1)
             h_t = self.f(
@@ -139,7 +135,7 @@ class RNN:
 
     # ### Backward pass ###
 
-    def backward(self, x: torch.Tensor, labels: torch.Tensor, hs: Dict, ps: Dict):
+    def backward(self, x: torch.Tensor, labels: torch.Tensor, hs: torch.Tensor, ps: torch.Tensor):
         """
         Makes backward pass through the network.
         Returns the gradients of loss w.r.t. network parameters -  w_hx, w_hh, w_hy.
@@ -163,6 +159,8 @@ class RNN:
         for t in reversed(range(len(x))):
             # dl / dy = p - label
             dy_t = ps[t] - labels_matrix[t]
+            print(dy_t.shape)
+            print(hs[t].shape)
 
             # dl / dw_hy = (dl / dy) * (dy / dw_hy)
             dw_hy += torch.matmul(dy_t, hs[t].t())
@@ -298,7 +296,7 @@ class RNN:
 
 
 if __name__ == '__main__':
-    dtype = torch.float32
+    dtype = torch.float64
 
     # should be simple plain text file
     file = open('data/datasets/simple.txt', 'r')
@@ -324,12 +322,13 @@ if __name__ == '__main__':
     assert all(abs(torch.sum(torch.exp(x)).item() - 1) < 1e-6 for x in log_ps)
 
     l_1 = rnn.calculate_loss(inputs, labels, False)
-
-    print(l_1.backward())
-    dw_hx_1, dw_hh_1, dw_hy_1 = rnn.backward(inputs, labels, hs, log_ps)
+    l_1.backward()
+    dw_hx_1, dw_hh_1, dw_hy_1 = rnn.w_hx.grad, rnn.w_hh.grad, rnn.w_hy.grad
+    rnn.backward(inputs, labels, hs, log_ps)
 
     # Karpathy implementation
-    l_2, dw_hx_2, dw_hh_2, dw_hy_2, _ = rnn.lossFun(inputs, labels, torch.zeros((10, 1)))
+    l_2, dw_hx_2, dw_hh_2, dw_hy_2, _ = rnn.lossFun(inputs, labels,
+                                                    torch.zeros((10, 1), dtype=dtype))
 
     print()
     print('Checking current implementation with Karpathy implementation.')
