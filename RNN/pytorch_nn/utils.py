@@ -1,20 +1,9 @@
 import torch
 import torch.nn.functional as F
 
+
 def softmax(x: torch.Tensor) -> torch.Tensor:
     return F.softmax(x, dim=0)
-
-
-def sigmoid(x: torch.Tensor) -> torch.Tensor:
-    return F.sigmoid(x)
-
-
-def relu(x: torch.Tensor) -> torch.Tensor:
-    return F.relu(x)
-
-
-def tanh(x: torch.Tensor) -> torch.Tensor:
-    return torch.tanh(x)
 
 
 def dsigmoid(y: torch.Tensor) -> torch.Tensor:
@@ -26,7 +15,7 @@ def dsigmoid(y: torch.Tensor) -> torch.Tensor:
 def drelu(y: torch.Tensor) -> torch.Tensor:
     # y = relu(x) = (x > 0) * x
     # dy / dx = (x > 0) * 1, so we can just replace all non zero elements in y with 1
-    dy = torch.tensor(y)
+    dy = y.clone()
     dy[dy != 0] = 1.
     return dy
 

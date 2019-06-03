@@ -103,12 +103,17 @@ def main(args):
     with open(args.params, 'r') as f:
         params = json.load(f)
 
+    import time
+
+    a = time.time()
     model, losses, = train_with_sgd(params, args.data,
                                     lr=args.lr,
                                     full_sequences=args.full_sequences,
                                     epochs=args.epochs,
                                     evaluate_loss_after=args.loss_evaluation_epochs,
                                     package=args.package)
+    print(time.time() - a)
+
     model.save(args.saving_path)
 
     plot_loss(losses)

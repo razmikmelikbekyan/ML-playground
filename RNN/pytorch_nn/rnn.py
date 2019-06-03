@@ -5,10 +5,10 @@ import torch
 import torch.nn.functional as F
 
 try:
-    from .utils import (softmax, sigmoid, tanh, relu, dsigmoid, drelu, dtanh,
+    from .utils import (softmax, dsigmoid, drelu, dtanh,
                         one_hot_encode, check_relative_difference)
 except ModuleNotFoundError:
-    from utils import (softmax, sigmoid, tanh, relu, dsigmoid, drelu, dtanh,
+    from utils import (softmax, dsigmoid, drelu, dtanh,
                        one_hot_encode, check_relative_difference)
 
 
@@ -22,9 +22,9 @@ class RNN:
     """
 
     activations = {
-        'tanh': torch.tanh,
-        'sigmoid': torch.sigmoid,
-        'relu': F.relu
+        'tanh': (torch.tanh, dtanh),
+        'sigmoid': (torch.sigmoid, dsigmoid),
+        'relu': (F.relu, drelu)
     }
 
     def __init__(self,
@@ -47,7 +47,7 @@ class RNN:
         self.dtype = dtype
 
         # activation function and its dervivate w.r.t. its direct input
-        self.f = self.activations[non_linearity]
+        self.f, self.f_prime = self.activations[non_linearity]
 
         # randomly initializing weights
 
@@ -77,7 +77,7 @@ class RNN:
 
     def reset_current_state(self):
         """Resets current state to zeros."""
-        self.current_state = torch.zeros((self.hidden_size, 1), dtype=self.dtype)
+        self.current_state = torch.zeros(self.hidden_size, dtype=self.dtype)
 
     # ### Forward pass ###
 
@@ -158,12 +158,10 @@ class RNN:
 
         for t in reversed(range(len(x))):
             # dl / dy = p - label
-            dy_t = ps[t] - labels_matrix[t]
-            print(dy_t.shape)
-            print(hs[t].shape)
+            dy_t = torch.exp(ps[t]) - labels_matrix[t]
 
             # dl / dw_hy = (dl / dy) * (dy / dw_hy)
-            dw_hy += torch.matmul(dy_t, hs[t].t())
+            dw_hy += torch.einsum('i,j->ij', dy_t, hs[t])
 
             # dl / dh = (dl / dy) * (dy / dh) = (p - label) * w_hy
             dh_t = torch.matmul(self.w_hy.t(), dy_t)
@@ -174,19 +172,22 @@ class RNN:
             # dl / dw_hh = ∑ (dl / dz_{k}) * (dz_{k} / dw_hh) for all k from 1 to t
             # dl / dw_hx = ∑ (dl / dz_{k}) * (dz_{k} / dw_hx) for all k from 1 to t
             for k in reversed(range(t + 1)):
+                h_k_1 = self.current_state if k == 0 else hs[k - 1]
+
                 # (dl / dz_{k}) (dz_{k} / dw_hh) = dz_k * h_{k-1}
-                dw_hh += torch.matmul(dz_k, hs[k - 1].t())
+                dw_hh += torch.einsum('i,j->ij', dz_k, h_k_1)
 
                 # (dl / dz_{k}) (dz_{k} / dw_h) = dz_k * x_{k}
-                dw_hx += torch.matmul(dz_k, inputs_matrix[k].t())
+                dw_hx += torch.einsum('i,j->ij', dz_k, inputs_matrix[k])
 
                 # updating dz_k using all previous dealues()rivatives (from t to t - k)
                 # dl / dz_(k-1) = (dl / dz_{k})(dz_{k} / dh_{k-1}) * (dh_{k-1) / dz_{k-1})
-                dz_k = torch.matmul(self.w_hh.t(), dz_k) * self.f_prime(hs[k - 1])
+                dz_k = torch.matmul(self.w_hh.t(), dz_k) * self.f_prime(h_k_1)
 
-        # # clip to mitigate exploding gradients
-        # for d_param in (dw_hx, dw_hh, dw_hy):
-        #     torch.clip(d_param, -5, 5, out=d_param)
+        # clip to mitigate exploding gradients
+        dw_hx = torch.clamp(dw_hx, -5., 5.)
+        dw_hh = torch.clamp(dw_hh, -5., 5.)
+        dw_hy = torch.clamp(dw_hy, -5., 5.)
 
         return dw_hx, dw_hh, dw_hy
 
@@ -200,13 +201,21 @@ class RNN:
         - backward pass: calculating loss and its gradient w.r.t. model params
         - sgd update: update params in the opposite of the gradient direction
         """
-        hs, ps = self.forward(x, True)
-        dw_hx, dw_hh, dw_hy = self.backward(x, labels, hs, ps)
+        loss = self.calculate_loss(x, labels, False)
+        loss.backward()
+        dw_hx, dw_hh, dw_hy = self.w_hx.grad, self.w_hh.grad, self.w_hy.grad
+        dw_hx = torch.clamp(dw_hx, -5., 5.)
+        dw_hh = torch.clamp(dw_hh, -5., 5.)
+        dw_hy = torch.clamp(dw_hy, -5., 5.)
+
+        # hs, ps = self.forward(x, True)
+        # dw_hx, dw_hh, dw_hy = self.backward(x, labels, hs, ps)
 
         # w <-- w - lr * dloss / dw
-        self.w_hx -= lr * dw_hx
-        self.w_hh -= lr * dw_hh
-        self.w_hy -= lr * dw_hy
+        self.w_hx = torch.tensor(self.w_hx - lr * dw_hx, requires_grad=True)
+        self.w_hh = torch.tensor(self.w_hh - lr * dw_hh, requires_grad=True)
+        self.w_hy = torch.tensor(self.w_hy - lr * dw_hy, requires_grad=True)
+
 
     # ### Sampling ###
 
@@ -226,7 +235,7 @@ class RNN:
         ix = seed_ix
         for t in range(n):
             _, ps = self.forward(torch.tensor([ix], dtype=torch.long), True)
-            ix = np.random.choice(possible_indexes, p=ps[0].numpy().ravel())
+            ix = np.random.choice(possible_indexes, p=torch.exp(ps[0]).detach().numpy().ravel())
             sample_indexes.append(possible_indexes[ix])
         return sample_indexes
 
@@ -264,9 +273,10 @@ class RNN:
         for t in range(len(inputs)):
             xs[t] = torch.zeros((vocab_size, 1), dtype=self.dtype)
             xs[t][inputs[t]] = 1
+
+            # hidden state
             hs[t] = torch.tanh(
-                torch.matmul(self.w_hx, xs[t]) + torch.matmul(self.w_hh,
-                                                              hs[t - 1]))  # hidden state
+                torch.matmul(self.w_hx, xs[t]) + torch.matmul(self.w_hh, hs[t - 1]))
             ys[t] = torch.matmul(self.w_hy, hs[t])  # unnormalized log probabilities for next chars
             ps[t] = torch.exp(ys[t]) / torch.sum(torch.exp(ys[t]))  # probabilities for next chars
             loss += -torch.log(ps[t][targets[t], 0])  # softmax (cross-entropy loss)
@@ -290,8 +300,10 @@ class RNN:
             dhnext = torch.matmul(self.w_hh.t(), dhraw)
 
         # clip to mitigate exploding gradients
-        # for dparam in [dWxh, dWhh, dWhy]:
-        #     np.clip(dparam, -5, 5, out=dparam)
+        dWxh = torch.clamp(dWxh, -5., 5.)
+        dWhh = torch.clamp(dWhh, -5., 5.)
+        dWhy = torch.clamp(dWhy, -5., 5.)
+
         return loss, dWxh, dWhh, dWhy, hs[len(inputs) - 1]
 
 
@@ -317,14 +329,20 @@ if __name__ == '__main__':
     rnn = RNN(vocab_size, 10, dtype=dtype)
 
     # current implementation
-    hs, log_ps = rnn.forward(inputs, False)
+    hs, log_ps = rnn.forward(inputs, update_state=False)
 
     assert all(abs(torch.sum(torch.exp(x)).item() - 1) < 1e-6 for x in log_ps)
 
+    # pytorch autograd backpropagation
     l_1 = rnn.calculate_loss(inputs, labels, False)
     l_1.backward()
     dw_hx_1, dw_hh_1, dw_hy_1 = rnn.w_hx.grad, rnn.w_hh.grad, rnn.w_hy.grad
-    rnn.backward(inputs, labels, hs, log_ps)
+    dw_hx_1 = torch.clamp(dw_hx_1, -5., 5.)
+    dw_hh_1 = torch.clamp(dw_hh_1, -5., 5.)
+    dw_hy_1 = torch.clamp(dw_hy_1, -5., 5.)
+
+    # manual backpropagation
+    # dw_hx_1, dw_hh_1, dw_hy_1 = rnn.backward(inputs, labels, hs, log_ps)
 
     # Karpathy implementation
     l_2, dw_hx_2, dw_hh_2, dw_hy_2, _ = rnn.lossFun(inputs, labels,
@@ -341,12 +359,17 @@ if __name__ == '__main__':
 
     print()
     assert torch.allclose(dw_hx_1, dw_hx_2, atol=1e-6)
+    assert torch.allclose(dw_hx_1, dw_hx_2, atol=1e-6)
+
     print('dWxh check is passed')
 
     print()
     assert torch.allclose(dw_hh_1, dw_hh_2, atol=1e-6)
+    assert torch.allclose(dw_hh_1, dw_hh_2, atol=1e-6)
+
     print('dWhh check is passed')
 
     print()
+    assert torch.allclose(dw_hy_1, dw_hy_2, atol=1e-6)
     assert torch.allclose(dw_hy_1, dw_hy_2, atol=1e-6)
     print('dWhy check is passed')
