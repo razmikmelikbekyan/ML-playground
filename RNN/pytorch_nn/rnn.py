@@ -27,11 +27,13 @@ class RNN:
         'relu': (F.relu, drelu)
     }
 
+    params = ('w_hx', 'w_hh', 'w_hy')
+
     def __init__(self,
                  vocabulary_size: int,
                  hidden_size: int,
                  non_linearity: str = 'tanh',
-                 dtype: torch.dtype = torch.float32):
+                 dtype: torch.dtype = torch.float64):
         """
         :param vocabulary_size: the size of vocabulary, aka the number of unique characters in
                                 vocabulary
@@ -51,26 +53,23 @@ class RNN:
 
         # randomly initializing weights
 
-        self.w_hx = torch.FloatTensor(hidden_size, vocabulary_size).uniform_(
+        self.w_hx = torch.Tensor(hidden_size, vocabulary_size).uniform_(
             -np.sqrt(1. / vocabulary_size), np.sqrt(1. / vocabulary_size)
         )
         self.w_hx = self.w_hx.type(self.dtype)
         self.w_hx.requires_grad = True
-        self.w_hx = torch.randn(hidden_size, vocabulary_size, requires_grad=True, dtype=dtype)
 
-        self.w_hh = torch.FloatTensor(hidden_size, hidden_size).uniform_(
+        self.w_hh = torch.Tensor(hidden_size, hidden_size).uniform_(
             -np.sqrt(1. / hidden_size), np.sqrt(1. / hidden_size)
         )
         self.w_hh = self.w_hh.type(self.dtype)
         self.w_hh.requires_grad = True
-        self.w_hh = torch.randn(hidden_size, hidden_size, requires_grad=True, dtype=dtype)
 
-        self.w_hy = torch.FloatTensor(vocabulary_size, hidden_size).uniform_(
+        self.w_hy = torch.Tensor(vocabulary_size, hidden_size).uniform_(
             -np.sqrt(1. / hidden_size), np.sqrt(1. / hidden_size)
         )
         self.w_hy = self.w_hy.type(self.dtype)
         self.w_hy.requires_grad = True
-        self.w_hy = torch.randn(vocabulary_size, hidden_size, requires_grad=True, dtype=dtype)
 
         # setting the current state
         self.current_state = torch.zeros(self.hidden_size, dtype=self.dtype)
@@ -122,6 +121,9 @@ class RNN:
 
             # updating hidden state and and predicted_probabilities keepers
             hs[t], log_ps[t] = h_t, p_t
+
+        if update_state:
+            self.current_state = hs[-1].clone()  # updating the current state
 
         return hs, log_ps
 
@@ -203,19 +205,20 @@ class RNN:
         """
         loss = self.calculate_loss(x, labels, False)
         loss.backward()
-        dw_hx, dw_hh, dw_hy = self.w_hx.grad, self.w_hh.grad, self.w_hy.grad
-        dw_hx = torch.clamp(dw_hx, -5., 5.)
-        dw_hh = torch.clamp(dw_hh, -5., 5.)
-        dw_hy = torch.clamp(dw_hy, -5., 5.)
 
         # hs, ps = self.forward(x, True)
         # dw_hx, dw_hh, dw_hy = self.backward(x, labels, hs, ps)
 
-        # w <-- w - lr * dloss / dw
-        self.w_hx = torch.tensor(self.w_hx - lr * dw_hx, requires_grad=True)
-        self.w_hh = torch.tensor(self.w_hh - lr * dw_hh, requires_grad=True)
-        self.w_hy = torch.tensor(self.w_hy - lr * dw_hy, requires_grad=True)
+        with torch.no_grad():
+            # w <-- w - lr * dloss / dw
+            self.w_hx -= lr * torch.clamp(self.w_hx.grad, -5., 5.)
+            self.w_hh -= lr * torch.clamp(self.w_hh.grad, -5., 5.)
+            self.w_hy -= lr * torch.clamp(self.w_hy.grad, -5., 5.)
 
+            # Manually zero the gradients after running the backward pass
+            self.w_hx.grad.zero_()
+            self.w_hh.grad.zero_()
+            self.w_hy.grad.zero_()
 
     # ### Sampling ###
 
@@ -243,18 +246,18 @@ class RNN:
 
     def save(self, saving_path: str):
         """Saves model."""
-        params = [self.w_hx, self.w_hh, self.w_hy, self.current_state]
-        np.save(saving_path, params)
+        np.save(saving_path, {p: getattr(self, p) for p in self.params})
         print(f'Model has been save at the following path: {saving_path}.')
 
     @staticmethod
     def load(model_path: str):
         """Loads saved model and returns it."""
-        w_hx, w_hh, w_hy, current_state = np.load(model_path)
+        params = dict(np.load(model_path).item())
+        w_hx, w_hh, w_hy = params['w_hx'], params['w_hh'], params['w_hy']
         _, vocabulary_size = w_hx.shape
         hidden_size, hidden_size = w_hh.shape
         model = RNN(vocabulary_size, hidden_size)
-        model.w_hx, model.w_hh, model.w_hy, model.current_state = w_hx, w_hh, w_hy, current_state
+        model.w_hx, model.w_hh, model.w_hy = w_hx, w_hh, w_hy
         return model
 
     # implementation by Andrej Kharpaty, for performing check

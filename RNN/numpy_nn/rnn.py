@@ -25,6 +25,8 @@ class RNN:
         'relu': (relu, drelu)
     }
 
+    params = ('w_hx', 'w_hh', 'w_hy')
+
     def __init__(self,
                  vocabulary_size: int,
                  hidden_size: int,
@@ -111,6 +113,7 @@ class RNN:
 
         if update_state:
             self.current_state = hs[len(x) - 1]  # updating the current state
+
         return hs, ps
 
     def calculate_loss(self, x: np.ndarray, labels: np.ndarray, update_state: bool) -> float:
@@ -240,18 +243,16 @@ class RNN:
          - if the last check is failed, then raises an error
 
         """
-        params = ('w_hx', 'w_hh', 'w_hy')
-
         # calculating the gradients using backpropagation, aka analytic gradients
         self.reset_current_state()
         hs, ps = self.forward(x, False)
-        analytic_gradients = self.backward(x, labels, hs, ps)
+        analytic_grads = self.backward(x, labels, hs, ps)
 
         # calculating numerical gradients
-        numeric_gradients = self.calculate_numeric_gradients(x, labels, epsilon)
+        numeric_grads = self.calculate_numeric_gradients(x, labels, epsilon)
 
         # gradient check for each parameter
-        for p_name, d_analytic, d_numeric in zip(params, analytic_gradients, numeric_gradients):
+        for p_name, d_analytic, d_numeric in zip(self.params, analytic_grads, numeric_grads):
             print(f"\nPerforming gradient check for parameter {p_name} "
                   f"with size = {np.prod(d_analytic.shape)}.")
 
@@ -305,18 +306,18 @@ class RNN:
 
     def save(self, saving_path: str):
         """Saves model."""
-        params = [self.w_hx, self.w_hh, self.w_hy, self.current_state]
-        np.save(saving_path, params)
+        np.save(saving_path, {p: getattr(self, p) for p in self.params})
         print(f'Model has been save at the following path: {saving_path}.')
 
     @staticmethod
     def load(model_path: str):
         """Loads saved model and returns it."""
-        w_hx, w_hh, w_hy, current_state = np.load(model_path)
+        params = dict(np.load(model_path).item())
+        w_hx, w_hh, w_hy = params['w_hx'], params['w_hh'], params['w_hy']
         _, vocabulary_size = w_hx.shape
         hidden_size, hidden_size = w_hh.shape
         model = RNN(vocabulary_size, hidden_size)
-        model.w_hx, model.w_hh, model.w_hy, model.current_state = w_hx, w_hh, w_hy, current_state
+        model.w_hx, model.w_hh, model.w_hy = w_hx, w_hh, w_hy
         return model
 
     # implementation by Andrej Kharpaty, for performing check
