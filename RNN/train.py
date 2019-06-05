@@ -2,6 +2,7 @@ import argparse
 import json
 from typing import Dict, Tuple, List
 
+import gc
 import matplotlib.pyplot as plt
 
 from data_utils import get_support_data, get_inputs_targets
@@ -56,16 +57,21 @@ def train_with_sgd(params: Dict,
 
     num_examples_seen = 0
     for epoch in range(epochs):
+
+        gc.collect()
+
         if epoch % evaluate_loss_after == 0:
             epoch_loss = sum([
-                model.calculate_loss(x, y, True).item()
+                model.calculate_loss(x, y, True)
                 for x, y in get_inputs_targets(data_path, sequence_length,
                                                char_to_ix, full_sequences, package)
             ])
             losses.append((num_examples_seen, epoch, epoch_loss))
 
-            print("Loss after num_examples_seen={} epoch={}: {:.2f}".format(
+            print("\nLoss after num_examples_seen={} epoch={}: {:.2f}".format(
                 num_examples_seen, epoch, epoch_loss))
+            print('\nGenerated sample from model:')
+            print(''.join(ix_to_char[ix] for ix in model.generate(20, 200)))
 
             # Adjust the learning rate if loss increases
             if len(losses) > 1 and losses[-1][-1] > losses[-2][-1]:
