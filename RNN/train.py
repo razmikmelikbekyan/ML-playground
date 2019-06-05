@@ -58,7 +58,7 @@ def train_with_sgd(params: Dict,
     for epoch in range(epochs):
         if epoch % evaluate_loss_after == 0:
             epoch_loss = sum([
-                model.calculate_loss(x, y, True)
+                model.calculate_loss(x, y, True).item()
                 for x, y in get_inputs_targets(data_path, sequence_length,
                                                char_to_ix, full_sequences, package)
             ])

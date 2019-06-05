@@ -1,7 +1,7 @@
 from argparse import ArgumentParser
-from itertools import tee
+import itertools
 
-import numpy_nn as np
+import numpy as np
 import torch
 from sklearn.metrics import classification_report, accuracy_score
 
@@ -9,7 +9,7 @@ from dataset import get_mnist_data
 from nn_auto_grad import NeuralNetwork as AutoGradNN
 from nn_manual_grad import NeuralNetwork as ManualGradNN
 from nn_nn_module import NeuralNetwork as NNModuleNN
-from numpy_nn.utils import plot_loss
+from utils import plot_loss
 
 nns = {
     '1': ManualGradNN,
@@ -30,8 +30,8 @@ if __name__ == '__main__':
     # Training
     train_loss, test_loss = [], []
     for epoch in range(epochs):
-        train_data, train_data_copy = tee(train_data)
-        test_data, test_data_copy = tee(test_data)
+        train_data, train_data_copy = itertools.tee(train_data)
+        test_data, test_data_copy = itertools.tee(test_data)
 
         train_loss.append(np.mean([nn.loss(x, l).item() for x, l in train_data_copy]))
         test_loss.append(np.mean([nn.loss(x, l).item() for x, l in test_data_copy]))
@@ -40,7 +40,7 @@ if __name__ == '__main__':
         print('\nepoch: {}, train loss: {:.5f}, test loss: {:.5f}'.format(
             epoch, train_loss[-1], test_loss[-1]))
 
-        train_data, train_data_copy = tee(train_data)
+        train_data, train_data_copy = itertools.tee(train_data)
         for x, l in train_data_copy:
             nn.sgd_step(x, l, 1e-4)
 
@@ -56,4 +56,4 @@ if __name__ == '__main__':
 
     print('\n**************** Classification report ****************')
     print(classification_report(labels, predictions))
-    print('Accuracy: {:.2f}'.format(accuracy_score(labels, predictions)))
+    print('Accuracy: {:.5f}'.format(accuracy_score(labels, predictions)))

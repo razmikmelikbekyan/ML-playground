@@ -1,15 +1,14 @@
-from typing import Tuple, Dict, List
+from typing import Tuple, List
 
 import numpy as np
 import torch
 import torch.nn.functional as F
+from torch import Tensor
 
 try:
-    from .utils import (softmax, dsigmoid, drelu, dtanh,
-                        one_hot_encode, check_relative_difference)
+    from .utils import dsigmoid, drelu, dtanh, one_hot_encode, check_relative_difference
 except ModuleNotFoundError:
-    from utils import (softmax, dsigmoid, drelu, dtanh,
-                       one_hot_encode, check_relative_difference)
+    from utils import dsigmoid, drelu, dtanh, one_hot_encode, check_relative_difference
 
 
 class RNN:
@@ -18,7 +17,7 @@ class RNN:
     character-level language model. The purpose of the network is correctly predicting the next
     character, given the previous sequence of characters.
 
-    This implementation is purely numpy based.
+    This implementation is purely PyTorch based. It uses PyTorch automatic gradient calculation.
     """
 
     activations = {
@@ -80,7 +79,7 @@ class RNN:
 
     # ### Forward pass ###
 
-    def forward(self, x: torch.Tensor, update_state: bool) -> Tuple[Dict, Dict]:
+    def forward(self, x: Tensor, update_state: bool) -> Tuple[Tensor, Tensor]:
         """
         The basic forward pass:
 
@@ -94,8 +93,8 @@ class RNN:
                   array will be the sequence length
         :param update_state: bool, if True updates current state with last state
         :return: the tuple of states and predicted_probabilities
-                 states - array of states, size = (sequence length, hidden size)
-                 predicted_probabilities - array of predicted probabilities for each character in
+                 states - tensor of states, size = (sequence length, hidden size)
+                 predicted_probabilities - tensor of predicted probabilities for each character in
                                            vocabulary, size = (sequence length, vocabulary size)
         """
         n = len(x)
@@ -127,75 +126,26 @@ class RNN:
 
         return hs, log_ps
 
-    def calculate_loss(self, x: np.ndarray, labels: np.ndarray, update_state: bool) -> float:
+    def _loss(self, x: Tensor, labels: Tensor, update_state: bool) -> Tensor:
         """
         Calculates cross entropy loss using target characters indexes and network predictions for
-        all characters: loss = ∑ -label_{t} * log(predicted_probability_{t})
+        all characters: loss = ∑ -label_{t} * log(predicted_probability_{t}). It keeps the
+        computational graph for automatic gradient calculation.
         """
         _, log_ps = self.forward(x, update_state)
         return -torch.sum(log_ps[(torch.arange(len(labels)), labels)])
 
-    # ### Backward pass ###
-
-    def backward(self, x: torch.Tensor, labels: torch.Tensor, hs: torch.Tensor, ps: torch.Tensor):
+    def calculate_loss(self, x: Tensor, labels: Tensor, update_state: bool) -> float:
         """
-        Makes backward pass through the network.
-        Returns the gradients of loss w.r.t. network parameters -  w_hx, w_hh, w_hy.
-
-        :param x: the array of input characters, where each item is the index of character, the
-                  size of array will be the sequence length
-        :param labels: the array of target characters, where each item is the index of character,
-                       the size of array will be the sequence length
-        :param hs: the hidden states of network, (the first output of the self.forward method)
-        :param ps: network predictions for given inputs,
-                   (the second output of the self.forward method)
-        :return: gradients of w_hx, w_hh, w_hy
+        Calculates cross entropy loss using target characters indexes and network predictions for
+        all characters: loss = ∑ -label_{t} * log(predicted_probability_{t}). It returns loss
+        value (float).
         """
-        inputs_matrix = one_hot_encode(x, self.vocabulary_size, self.dtype)
-        labels_matrix = one_hot_encode(labels, self.vocabulary_size, self.dtype)
-
-        dw_hx = torch.zeros_like(self.w_hx, dtype=self.dtype)
-        dw_hh = torch.zeros_like(self.w_hh, dtype=self.dtype)
-        dw_hy = torch.zeros_like(self.w_hy, dtype=self.dtype)
-
-        for t in reversed(range(len(x))):
-            # dl / dy = p - label
-            dy_t = torch.exp(ps[t]) - labels_matrix[t]
-
-            # dl / dw_hy = (dl / dy) * (dy / dw_hy)
-            dw_hy += torch.einsum('i,j->ij', dy_t, hs[t])
-
-            # dl / dh = (dl / dy) * (dy / dh) = (p - label) * w_hy
-            dh_t = torch.matmul(self.w_hy.t(), dy_t)
-
-            # dl / dz_{k} = (dl / dh_{k}) * (dh_{k} / dz_{k}) = dh_{t} * (dh_{k} / dz_{k})
-            dz_k = dh_t * self.f_prime(hs[t])
-
-            # dl / dw_hh = ∑ (dl / dz_{k}) * (dz_{k} / dw_hh) for all k from 1 to t
-            # dl / dw_hx = ∑ (dl / dz_{k}) * (dz_{k} / dw_hx) for all k from 1 to t
-            for k in reversed(range(t + 1)):
-                h_k_1 = self.current_state if k == 0 else hs[k - 1]
-
-                # (dl / dz_{k}) (dz_{k} / dw_hh) = dz_k * h_{k-1}
-                dw_hh += torch.einsum('i,j->ij', dz_k, h_k_1)
-
-                # (dl / dz_{k}) (dz_{k} / dw_h) = dz_k * x_{k}
-                dw_hx += torch.einsum('i,j->ij', dz_k, inputs_matrix[k])
-
-                # updating dz_k using all previous dealues()rivatives (from t to t - k)
-                # dl / dz_(k-1) = (dl / dz_{k})(dz_{k} / dh_{k-1}) * (dh_{k-1) / dz_{k-1})
-                dz_k = torch.matmul(self.w_hh.t(), dz_k) * self.f_prime(h_k_1)
-
-        # clip to mitigate exploding gradients
-        dw_hx = torch.clamp(dw_hx, -5., 5.)
-        dw_hh = torch.clamp(dw_hh, -5., 5.)
-        dw_hy = torch.clamp(dw_hy, -5., 5.)
-
-        return dw_hx, dw_hh, dw_hy
+        return self._loss(x, labels, update_state).item()
 
     # ### Gradient descent ###
 
-    def sgd_step(self, x: torch.Tensor, labels: torch.Tensor, lr: float):
+    def sgd_step(self, x: Tensor, labels: Tensor, lr: float):
         """
         Performs gradient descent step for model parameters: w_hx, w_hh, w_hy.
 
@@ -203,11 +153,9 @@ class RNN:
         - backward pass: calculating loss and its gradient w.r.t. model params
         - sgd update: update params in the opposite of the gradient direction
         """
-        loss = self.calculate_loss(x, labels, False)
+        # Backward pass
+        loss = self._loss(x, labels, False)
         loss.backward()
-
-        # hs, ps = self.forward(x, True)
-        # dw_hx, dw_hh, dw_hy = self.backward(x, labels, hs, ps)
 
         with torch.no_grad():
             # w <-- w - lr * dloss / dw
@@ -270,7 +218,7 @@ class RNN:
         """
         xs, hs, ys, ps = {}, {}, {}, {}
         hs[-1] = hprev.clone().detach()
-        loss = 0
+        loss = torch.tensor([0], dtype=self.dtype)
 
         # forward pass
         for t in range(len(inputs)):
@@ -337,15 +285,12 @@ if __name__ == '__main__':
     assert all(abs(torch.sum(torch.exp(x)).item() - 1) < 1e-6 for x in log_ps)
 
     # pytorch autograd backpropagation
-    l_1 = rnn.calculate_loss(inputs, labels, False)
+    l_1 = rnn._loss(inputs, labels, False)
     l_1.backward()
     dw_hx_1, dw_hh_1, dw_hy_1 = rnn.w_hx.grad, rnn.w_hh.grad, rnn.w_hy.grad
     dw_hx_1 = torch.clamp(dw_hx_1, -5., 5.)
     dw_hh_1 = torch.clamp(dw_hh_1, -5., 5.)
     dw_hy_1 = torch.clamp(dw_hy_1, -5., 5.)
-
-    # manual backpropagation
-    # dw_hx_1, dw_hh_1, dw_hy_1 = rnn.backward(inputs, labels, hs, log_ps)
 
     # Karpathy implementation
     l_2, dw_hx_2, dw_hh_2, dw_hy_2, _ = rnn.lossFun(inputs, labels,
@@ -355,8 +300,8 @@ if __name__ == '__main__':
     print('Checking current implementation with Karpathy implementation.')
 
     print()
-    print('loss_1={:.5f}'.format(l_1))
-    print('loss_2={:.5f}'.format(l_2))
+    print('loss_1={:.5f}'.format(l_1.item()))
+    print('loss_2={:.5f}'.format(l_2.item()))
     assert abs(l_1.item() - l_2.item()) < 1e-6
     print('loss check is passed')
 

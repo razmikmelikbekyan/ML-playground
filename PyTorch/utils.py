@@ -1,11 +1,11 @@
 from typing import List
 
 import matplotlib.pyplot as plt
-import numpy_nn as np
+import numpy as np
 import torch
 
 
-def check_relative_difference(a: torch.tensor, b: torch.tensor, threshold: float) -> bool:
+def check_relative_difference(a: torch.Tensor, b: torch.Tensor, threshold: float) -> bool:
     """Returns True if (|a - b| / (|a| + |b|)) > threshold else False."""
     numerator = torch.abs(a - b)
     denominator = torch.abs(a) + torch.abs(b)
