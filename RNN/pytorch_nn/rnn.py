@@ -141,7 +141,9 @@ class RNN:
         all characters: loss = ∑ -label_{t} * log(predicted_probability_{t}). It returns loss
         value (float).
         """
-        return self._loss(x, labels, update_state).item()
+        with torch.no_grad():
+            value = self._loss(x, labels, update_state).item()
+        return value
 
     # ### Gradient descent ###
 
