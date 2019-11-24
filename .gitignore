@@ -6,4 +6,4 @@
 .ipynb_checkpoints/
 *venv/
 *tmp/
-
+.DS_Store

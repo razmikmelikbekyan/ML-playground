@@ -1,0 +1,16 @@
+numpy==1.17.3
+shap
+https://download.pytorch.org/whl/cpu/torch-1.3.0%2Bcpu-cp37-cp37m-linux_x86_64.whl
+torchvision
+scipy
+pandas
+matplotlib
+seaborn
+scikit-learn
+jupyter
+jupyterlab
+pandas-profiling
+scikit-plot
+unidecode
+tabulate
+nose
